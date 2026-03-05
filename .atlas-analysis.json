@@ -1,0 +1,80 @@
+{
+  "projectType": "saas",
+  "projectName": "Workshop Cloud Chat",
+  "projectDescription": "AI-powered chat application built with Astro and AWS Bedrock for intelligent document-based conversations.",
+  "theme": "palm",
+  "primaryColor": "#8453d2",
+  "lightColor": "#7ca8ff",
+  "darkColor": "#9b73f0",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "features/chat-interface",
+              "features/document-management",
+              "features/knowledge-base-sync"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/aws-credentials",
+              "configuration/bedrock-agent",
+              "configuration/s3-setup",
+              "configuration/knowledge-base"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/aws-amplify",
+              "deployment/environment-variables"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/chat",
+              "api/upload-pdf",
+              "api/sync",
+              "api/sync-history"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "AI-powered chat interface using Amazon Bedrock agents",
+    "PDF document upload and management with S3",
+    "Knowledge Base synchronization for RAG workflows",
+    "Real-time ingestion job monitoring",
+    "Session-based conversation management",
+    "Dark/light theme support"
+  ],
+  "publicApiSurface": [
+    "POST /api/chat - Invoke Bedrock agent with user messages",
+    "POST /api/upload-pdf - Upload PDF documents to S3",
+    "GET /api/upload-pdf - List documents in S3 bucket",
+    "DELETE /api/upload-pdf - Delete documents from S3",
+    "POST /api/sync - Start Knowledge Base ingestion job",
+    "GET /api/sync - Get ingestion job status",
+    "POST /api/sync-history - List recent ingestion jobs from AWS"
+  ]
+}
