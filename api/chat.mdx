@@ -1,0 +1,223 @@
+---
+title: POST /api/chat
+description: Invoke a Bedrock agent with user messages and receive AI-generated responses
+---
+
+## Overview
+
+The `/api/chat` endpoint invokes an Amazon Bedrock agent with user messages and returns the agent's streaming response. This endpoint handles session management, AWS authentication, and message processing.
+
+## Endpoint
+
+```
+POST /api/chat
+```
+
+## Request Body
+
+The request must be sent as JSON with the following structure:
+
+<ParamField path="region" type="string" required>
+  AWS region where your Bedrock agent is deployed (e.g., `us-east-1`)
+</ParamField>
+
+<ParamField path="agentId" type="string" required>
+  The unique identifier of your Bedrock agent
+</ParamField>
+
+<ParamField path="agentAliasId" type="string" required>
+  The alias ID of your Bedrock agent (e.g., `TSTALIASID`)
+</ParamField>
+
+<ParamField path="accessKeyId" type="string" required>
+  AWS Access Key ID for authentication
+</ParamField>
+
+<ParamField path="secretAccessKey" type="string" required>
+  AWS Secret Access Key for authentication
+</ParamField>
+
+<ParamField path="sessionToken" type="string">
+  Optional AWS Session Token for temporary credentials
+</ParamField>
+
+<ParamField path="sessionId" type="string">
+  Optional session ID for continuing a conversation. If not provided, a new UUID will be generated.
+</ParamField>
+
+<ParamField path="messages" type="array" required>
+  Array of message objects with `role` ("user" or "assistant") and `content` (string)
+</ParamField>
+
+### Request Example
+
+```json
+{
+  "region": "us-east-1",
+  "agentId": "ABCDEFGHIJ",
+  "agentAliasId": "TSTALIASID",
+  "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+  "secretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+  "sessionToken": "",
+  "sessionId": "123e4567-e89b-12d3-a456-426614174000",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is the capital of France?"
+    }
+  ]
+}
+```
+
+## Response
+
+### Success Response (200 OK)
+
+<ResponseField name="reply" type="string">
+  The agent's response text, with null bytes removed and whitespace trimmed
+</ResponseField>
+
+<ResponseField name="sessionId" type="string">
+  The session ID used for this conversation (either provided or generated)
+</ResponseField>
+
+```json
+{
+  "reply": "The capital of France is Paris.",
+  "sessionId": "123e4567-e89b-12d3-a456-426614174000"
+}
+```
+
+### Error Responses
+
+#### 400 Bad Request - Missing Parameters
+
+```json
+{
+  "error": "Faltan parámetros de configuración del agente Bedrock."
+}
+```
+
+Returned when required fields (`region`, `agentId`, `agentAliasId`, `accessKeyId`, or `secretAccessKey`) are missing.
+
+#### 400 Bad Request - No Messages
+
+```json
+{
+  "error": "No hay mensajes para enviar."
+}
+```
+
+Returned when the `messages` array is empty or contains no user messages with content.
+
+#### 500 Internal Server Error
+
+```json
+{
+  "error": "Error message from AWS or internal error"
+}
+```
+
+Returned when there's an error communicating with Bedrock or processing the request.
+
+## Implementation Details
+
+### Message Processing
+
+The endpoint extracts the latest user message from the messages array:
+
+```typescript
+const latestUserMessage = [...(body.messages || [])]
+  .reverse()
+  .find((item) => item?.role === 'user' && item?.content?.trim());
+```
+
+### Session Management
+
+If no `sessionId` is provided, the endpoint generates a new UUID:
+
+```typescript
+const sessionId = body.sessionId?.trim() || crypto.randomUUID();
+```
+
+### Streaming Response
+
+The endpoint processes the streaming response from Bedrock:
+
+```typescript
+const response = await client.send(command);
+const decoder = new TextDecoder();
+let reply = '';
+
+if (response.completion) {
+  for await (const chunkEvent of response.completion) {
+    const bytes = chunkEvent.chunk?.bytes;
+    if (bytes) {
+      reply += decoder.decode(bytes, { stream: true });
+    }
+  }
+  reply += decoder.decode();
+}
+
+const normalizedReply = reply.replace(/\u0000/g, '').trim();
+```
+
+## cURL Example
+
+```bash
+curl -X POST https://your-domain.com/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "region": "us-east-1",
+    "agentId": "ABCDEFGHIJ",
+    "agentAliasId": "TSTALIASID",
+    "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+    "secretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Hello, how are you?"
+      }
+    ]
+  }'
+```
+
+## JavaScript Example
+
+```javascript
+const response = await fetch('/api/chat', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    region: 'us-east-1',
+    agentId: 'ABCDEFGHIJ',
+    agentAliasId: 'TSTALIASID',
+    accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+    secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+    sessionId: '123e4567-e89b-12d3-a456-426614174000',
+    messages: [
+      {
+        role: 'user',
+        content: 'What is machine learning?'
+      }
+    ]
+  })
+});
+
+const data = await response.json();
+console.log(data.reply);
+console.log(data.sessionId);
+```
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Chat Interface" icon="comments" href="/features/chat-interface">
+    Learn about the chat interface that uses this API
+  </Card>
+  <Card title="Bedrock Agent Configuration" icon="robot" href="/configuration/bedrock-agent">
+    Configure your Bedrock agent settings
+  </Card>
+</CardGroup>

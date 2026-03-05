@@ -1,0 +1,290 @@
+---
+title: POST /api/sync-history
+description: Retrieve historical ingestion jobs from AWS Bedrock Knowledge Base
+---
+
+## Overview
+
+The `/api/sync-history` endpoint retrieves a list of recent ingestion jobs from AWS Bedrock Knowledge Base. This is useful for viewing past synchronization attempts, their statuses, and timestamps.
+
+## Endpoint
+
+```
+POST /api/sync-history
+```
+
+## Request Body
+
+The request must be sent as JSON:
+
+<ParamField path="region" type="string" required>
+  AWS region where your Knowledge Base is located (e.g., `us-east-1`)
+</ParamField>
+
+<ParamField path="knowledgeBaseId" type="string" required>
+  The unique identifier of your Bedrock Knowledge Base
+</ParamField>
+
+<ParamField path="dataSourceId" type="string" required>
+  The unique identifier of the data source within the Knowledge Base
+</ParamField>
+
+<ParamField path="accessKeyId" type="string" required>
+  AWS Access Key ID for authentication
+</ParamField>
+
+<ParamField path="secretAccessKey" type="string" required>
+  AWS Secret Access Key for authentication
+</ParamField>
+
+<ParamField path="sessionToken" type="string">
+  Optional AWS Session Token for temporary credentials
+</ParamField>
+
+<ParamField path="maxResults" type="number">
+  Maximum number of results to return (default: 30, min: 1, max: 100)
+</ParamField>
+
+## Request Example
+
+```json
+{
+  "region": "us-east-1",
+  "knowledgeBaseId": "ABCDEFGHIJ",
+  "dataSourceId": "KLMNOPQRST",
+  "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+  "secretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+  "maxResults": 40
+}
+```
+
+## Response
+
+### Success (200 OK)
+
+<ResponseField name="executions" type="array">
+  Array of execution objects representing ingestion jobs from AWS
+</ResponseField>
+
+<Expandable title="executions">
+  <ResponseField name="id" type="string">
+    Unique identifier in the format `aws-{ingestionJobId}`
+  </ResponseField>
+
+  <ResponseField name="source" type="string">
+    Always `"AWS"` to indicate this execution came from AWS history
+  </ResponseField>
+
+  <ResponseField name="jobId" type="string">
+    The AWS ingestion job ID
+  </ResponseField>
+
+  <ResponseField name="status" type="string">
+    Mapped UI status: `PENDIENTE`, `EN_EJECUCION`, `COMPLETADO`, or `FALLIDO`
+  </ResponseField>
+
+  <ResponseField name="startedAt" type="string">
+    ISO 8601 timestamp when the job started
+  </ResponseField>
+
+  <ResponseField name="finishedAt" type="string">
+    ISO 8601 timestamp when the job finished (if completed)
+  </ResponseField>
+
+  <ResponseField name="logs" type="array">
+    Array of log messages with job details and timestamps
+  </ResponseField>
+</Expandable>
+
+```json
+{
+  "executions": [
+    {
+      "id": "aws-abc123xyz",
+      "source": "AWS",
+      "jobId": "abc123xyz",
+      "status": "COMPLETADO",
+      "startedAt": "2024-03-05T14:30:00.000Z",
+      "finishedAt": "2024-03-05T14:32:15.000Z",
+      "logs": [
+        "[3/5/2024, 3:00:00 PM] Historial recuperado desde AWS.",
+        "Ingestion Job ID: abc123xyz",
+        "Estado AWS: COMPLETE",
+        "Iniciado: 3/5/2024, 2:30:00 PM",
+        "Última actualización: 3/5/2024, 2:32:15 PM"
+      ]
+    },
+    {
+      "id": "aws-def456uvw",
+      "source": "AWS",
+      "jobId": "def456uvw",
+      "status": "FALLIDO",
+      "startedAt": "2024-03-05T12:00:00.000Z",
+      "finishedAt": "2024-03-05T12:01:30.000Z",
+      "logs": [
+        "[3/5/2024, 1:00:00 PM] Historial recuperado desde AWS.",
+        "Ingestion Job ID: def456uvw",
+        "Estado AWS: FAILED",
+        "Iniciado: 3/5/2024, 12:00:00 PM",
+        "Última actualización: 3/5/2024, 12:01:30 PM"
+      ]
+    }
+  ]
+}
+```
+
+## Status Mapping
+
+The endpoint maps AWS ingestion job statuses to UI-friendly status values:
+
+| AWS Status | UI Status | Description |
+|------------|-----------|-------------|
+| `COMPLETE` | `COMPLETADO` | Job finished successfully |
+| `FAILED` | `FALLIDO` | Job failed with an error |
+| `IN_PROGRESS` | `EN_EJECUCION` | Job is currently running |
+| `STARTING` | `EN_EJECUCION` | Job is starting up |
+| Other | `PENDIENTE` | Unknown or pending status |
+
+### Implementation
+
+```typescript
+const mapAwsStatusToUiStatus = (status?: string): UiSyncStatus => {
+  if (status === 'COMPLETE') return 'COMPLETADO';
+  if (status === 'FAILED') return 'FALLIDO';
+  if (status === 'IN_PROGRESS' || status === 'STARTING') return 'EN_EJECUCION';
+  return 'PENDIENTE';
+};
+```
+
+## Error Responses
+
+### 400 Bad Request
+
+```json
+{
+  "error": "Faltan parámetros para consultar historial de sincronización."
+}
+```
+
+Returned when required parameters are missing.
+
+### 500 Internal Server Error
+
+```json
+{
+  "error": "Error message from AWS or internal error"
+}
+```
+
+Returned when there's an error communicating with AWS or processing the request.
+
+## cURL Example
+
+```bash
+curl -X POST https://your-domain.com/api/sync-history \
+  -H "Content-Type: application/json" \
+  -d '{
+    "region": "us-east-1",
+    "knowledgeBaseId": "ABCDEFGHIJ",
+    "dataSourceId": "KLMNOPQRST",
+    "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+    "secretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    "maxResults": 40
+  }'
+```
+
+## JavaScript Example
+
+```javascript
+const response = await fetch('/api/sync-history', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    region: 'us-east-1',
+    knowledgeBaseId: 'ABCDEFGHIJ',
+    dataSourceId: 'KLMNOPQRST',
+    accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+    secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+    maxResults: 40
+  })
+});
+
+const data = await response.json();
+
+console.log(`Found ${data.executions.length} historical jobs`);
+
+data.executions.forEach(exec => {
+  console.log(`Job ${exec.jobId}: ${exec.status}`);
+  console.log(`  Started: ${new Date(exec.startedAt).toLocaleString()}`);
+  if (exec.finishedAt) {
+    console.log(`  Finished: ${new Date(exec.finishedAt).toLocaleString()}`);
+  }
+});
+```
+
+## Merging with Local Executions
+
+The UI merges executions from this endpoint with local executions from POST /api/sync:
+
+```typescript
+const mergeExecutions = (incomingExecutions) => {
+  const map = new Map();
+
+  state.executions.forEach((exec) => {
+    if (!exec?.id) return;
+    map.set(exec.id, exec);
+  });
+
+  (incomingExecutions || []).forEach((exec) => {
+    if (!exec?.id) return;
+    const previous = map.get(exec.id) || {};
+    map.set(exec.id, {
+      ...previous,
+      ...exec,
+      logs: Array.isArray(exec.logs) && exec.logs.length > 0 
+        ? exec.logs 
+        : previous.logs || []
+    });
+  });
+
+  state.executions = Array.from(map.values());
+};
+```
+
+This ensures:
+- Local executions (from POST /api/sync) are preserved
+- AWS executions are added
+- Local logs are kept if AWS doesn't provide detailed logs
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Audit Trail" icon="list-check">
+    Review all past ingestion jobs for auditing and compliance
+  </Card>
+  <Card title="Troubleshooting" icon="wrench">
+    Investigate failed jobs and identify patterns
+  </Card>
+  <Card title="Performance Monitoring" icon="chart-line">
+    Track ingestion job durations and success rates
+  </Card>
+  <Card title="Status Dashboard" icon="gauge">
+    Display recent sync activity in a monitoring dashboard
+  </Card>
+</CardGroup>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Knowledge Base Sync" icon="database" href="/features/knowledge-base-sync">
+    Learn about the Knowledge Base sync interface
+  </Card>
+  <Card title="Start Sync Job" icon="play" href="/api/sync">
+    Start a new ingestion job with POST /api/sync
+  </Card>
+  <Card title="KB Configuration" icon="gear" href="/configuration/knowledge-base">
+    Configure your Knowledge Base settings
+  </Card>
+</CardGroup>

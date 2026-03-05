@@ -1,0 +1,312 @@
+---
+title: /api/sync
+description: Start and monitor Knowledge Base ingestion jobs
+---
+
+## Overview
+
+The `/api/sync` endpoint manages Amazon Bedrock Knowledge Base ingestion jobs. It provides two methods:
+
+- **POST**: Start a new ingestion job
+- **GET**: Check the status of a running ingestion job
+
+---
+
+## POST /api/sync
+
+Start a new Knowledge Base ingestion job. The endpoint creates an execution ID, starts the ingestion process asynchronously, and returns immediately. The job continues running in the background with automatic status polling every 4 seconds.
+
+### Request Body
+
+The request must be sent as JSON:
+
+<ParamField path="region" type="string" required>
+  AWS region where your Knowledge Base is located (e.g., `us-east-1`)
+</ParamField>
+
+<ParamField path="knowledgeBaseId" type="string" required>
+  The unique identifier of your Bedrock Knowledge Base
+</ParamField>
+
+<ParamField path="dataSourceId" type="string" required>
+  The unique identifier of the data source within the Knowledge Base
+</ParamField>
+
+<ParamField path="accessKeyId" type="string" required>
+  AWS Access Key ID for authentication
+</ParamField>
+
+<ParamField path="secretAccessKey" type="string" required>
+  AWS Secret Access Key for authentication
+</ParamField>
+
+<ParamField path="sessionToken" type="string">
+  Optional AWS Session Token for temporary credentials
+</ParamField>
+
+<ParamField path="description" type="string">
+  Optional description for the ingestion job (default: "Sincronización ejecutada desde la interfaz de chat")
+</ParamField>
+
+### Request Example
+
+```json
+{
+  "region": "us-east-1",
+  "knowledgeBaseId": "ABCDEFGHIJ",
+  "dataSourceId": "KLMNOPQRST",
+  "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+  "secretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+  "description": "Sync documents from workshop"
+}
+```
+
+### Response
+
+#### Success (202 Accepted)
+
+<ResponseField name="executionId" type="string">
+  A unique UUID for tracking this execution. Use this ID with GET /api/sync to monitor progress.
+</ResponseField>
+
+```json
+{
+  "executionId": "123e4567-e89b-12d3-a456-426614174000"
+}
+```
+
+<Note>
+  The 202 status code indicates the job has been accepted and is running asynchronously. The actual ingestion process continues in the background.
+</Note>
+
+### Error Responses
+
+#### 400 Bad Request
+
+```json
+{
+  "error": "Faltan parámetros de sincronización."
+}
+```
+
+Returned when required fields are missing.
+
+#### 500 Internal Server Error
+
+```json
+{
+  "error": "Error message from AWS or internal error"
+}
+```
+
+### Implementation Details
+
+The endpoint uses an asynchronous background process:
+
+```typescript
+const executionId = crypto.randomUUID();
+
+executions.set(executionId, {
+  id: executionId,
+  status: 'PENDIENTE',
+  logs: [`[${new Date().toLocaleString('es-ES')}] Ejecución creada.`],
+  startedAt: new Date().toISOString()
+});
+
+void runSyncProcess(executionId, payload);
+```
+
+The background process:
+
+1. Starts the ingestion job with `StartIngestionJobCommand`
+2. Polls the job status every 4 seconds with `GetIngestionJobCommand`
+3. Continues polling while status is `STARTING` or `IN_PROGRESS`
+4. Updates execution status to `COMPLETADO` or `FALLIDO` when done
+
+### cURL Example
+
+```bash
+curl -X POST https://your-domain.com/api/sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "region": "us-east-1",
+    "knowledgeBaseId": "ABCDEFGHIJ",
+    "dataSourceId": "KLMNOPQRST",
+    "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+    "secretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    "description": "Manual sync from UI"
+  }'
+```
+
+### JavaScript Example
+
+```javascript
+const response = await fetch('/api/sync', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    region: 'us-east-1',
+    knowledgeBaseId: 'ABCDEFGHIJ',
+    dataSourceId: 'KLMNOPQRST',
+    accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+    secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+    description: 'Sync from dashboard'
+  })
+});
+
+const data = await response.json();
+const executionId = data.executionId;
+
+// Poll for status updates
+const checkStatus = async () => {
+  const statusResponse = await fetch(`/api/sync?executionId=${executionId}`);
+  const execution = await statusResponse.json();
+  console.log(`Status: ${execution.status}`);
+  
+  if (execution.status === 'EN_EJECUCION' || execution.status === 'PENDIENTE') {
+    setTimeout(checkStatus, 2000);
+  }
+};
+
+checkStatus();
+```
+
+---
+
+## GET /api/sync
+
+Retrieve the current status and logs of a running or completed ingestion job.
+
+### Request Parameters
+
+<ParamField query="executionId" type="string" required>
+  The execution ID returned by POST /api/sync
+</ParamField>
+
+### Response
+
+#### Success (200 OK)
+
+<ResponseField name="id" type="string">
+  The execution ID
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Current status: `PENDIENTE`, `EN_EJECUCION`, `COMPLETADO`, or `FALLIDO`
+</ResponseField>
+
+<ResponseField name="logs" type="array">
+  Array of log messages with timestamps
+</ResponseField>
+
+<ResponseField name="startedAt" type="string">
+  ISO 8601 timestamp when the execution started
+</ResponseField>
+
+<ResponseField name="finishedAt" type="string">
+  ISO 8601 timestamp when the execution finished (only present if completed or failed)
+</ResponseField>
+
+```json
+{
+  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "status": "COMPLETADO",
+  "logs": [
+    "[3/5/2024, 10:00:00 AM] Ejecución creada.",
+    "[3/5/2024, 10:00:01 AM] Iniciando tarea de sincronización en Bedrock Knowledge Base...",
+    "[3/5/2024, 10:00:03 AM] Ingestion Job iniciado: abc123xyz",
+    "[3/5/2024, 10:00:07 AM] Estado actual: IN_PROGRESS",
+    "[3/5/2024, 10:00:11 AM] Estado actual: IN_PROGRESS",
+    "[3/5/2024, 10:00:15 AM] Estado actual: COMPLETE",
+    "[3/5/2024, 10:00:15 AM] Sincronización completada correctamente."
+  ],
+  "startedAt": "2024-03-05T15:00:00.000Z",
+  "finishedAt": "2024-03-05T15:00:15.000Z"
+}
+```
+
+### Status Values
+
+| Status | Description |
+|--------|-------------|
+| `PENDIENTE` | Execution created, waiting to start |
+| `EN_EJECUCION` | Ingestion job is actively running |
+| `COMPLETADO` | Ingestion job completed successfully |
+| `FALLIDO` | Ingestion job failed or encountered an error |
+
+### Error Responses
+
+#### 404 Not Found
+
+```json
+{
+  "error": "No se encontró la ejecución solicitada."
+}
+```
+
+Returned when the execution ID doesn't exist or has expired from memory.
+
+### cURL Example
+
+```bash
+curl -X GET "https://your-domain.com/api/sync?executionId=123e4567-e89b-12d3-a456-426614174000"
+```
+
+### JavaScript Example
+
+```javascript
+const executionId = '123e4567-e89b-12d3-a456-426614174000';
+
+const response = await fetch(`/api/sync?executionId=${executionId}`);
+const execution = await response.json();
+
+console.log(`Status: ${execution.status}`);
+console.log('Logs:');
+execution.logs.forEach(log => console.log(log));
+
+if (execution.finishedAt) {
+  const duration = new Date(execution.finishedAt) - new Date(execution.startedAt);
+  console.log(`Duration: ${duration / 1000} seconds`);
+}
+```
+
+## Polling Pattern
+
+The endpoint implements automatic polling with a 4-second interval:
+
+```typescript
+while (currentStatus === 'STARTING' || currentStatus === 'IN_PROGRESS') {
+  await wait(4000);
+
+  const statusResponse = await client.send(
+    new GetIngestionJobCommand({
+      knowledgeBaseId: payload.knowledgeBaseId,
+      dataSourceId: payload.dataSourceId,
+      ingestionJobId
+    })
+  );
+
+  currentStatus = statusResponse.ingestionJob?.status;
+  addLog(executionId, `Estado actual: ${currentStatus || 'DESCONOCIDO'}`);
+}
+```
+
+<Warning>
+  Execution state is stored in server memory. If the server restarts, execution IDs will be lost. For production, consider using a persistent store like Redis or a database.
+</Warning>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Knowledge Base Sync" icon="database" href="/features/knowledge-base-sync">
+    Learn about the Knowledge Base sync interface
+  </Card>
+  <Card title="KB Configuration" icon="gear" href="/configuration/knowledge-base">
+    Configure your Knowledge Base settings
+  </Card>
+  <Card title="Sync History" icon="clock-rotate-left" href="/api/sync-history">
+    Retrieve historical ingestion jobs from AWS
+  </Card>
+</CardGroup>

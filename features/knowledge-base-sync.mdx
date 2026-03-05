@@ -1,0 +1,640 @@
+---
+title: "Knowledge Base Sync"
+description: "Synchronize documents from S3 to Amazon Bedrock Knowledge Base with real-time status monitoring"
+---
+
+## Overview
+
+The Knowledge Base synchronization feature manages ingestion jobs that process documents from S3 into Amazon Bedrock Knowledge Base. It provides real-time status monitoring, execution history, and detailed logs for troubleshooting.
+
+<CardGroup cols={2}>
+  <Card title="Ingestion Jobs" icon="database">
+    Start data source ingestion jobs programmatically
+  </Card>
+  <Card title="Real-time Status" icon="activity">
+    Monitor job progress with automatic polling
+  </Card>
+  <Card title="Execution History" icon="clock-rotate-left">
+    View past sync operations from AWS
+  </Card>
+  <Card title="Detailed Logs" icon="file-lines">
+    Access timestamped logs for each execution
+  </Card>
+</CardGroup>
+
+## Sync Configuration
+
+Configure your Knowledge Base and data source settings before initiating sync operations.
+
+### Required Parameters
+
+```typescript
+const state = {
+  sync: {
+    region: '',              // AWS region
+    knowledgeBaseId: '',     // KB identifier
+    dataSourceId: '',        // Data source identifier
+    description: 'Sincronización manual desde UI'  // Job description
+  }
+};
+```
+
+### Configuration Dialog
+
+```html
+<dialog id="syncDialog">
+  <form method="dialog" class="modal" id="syncForm">
+    <h2>Configuración de sincronización KB</h2>
+    <p class="hint required-note">
+      Los campos marcados como (requerido) son obligatorios.
+    </p>
+    <div class="grid-2">
+      <label>Región (requerido)
+        <input name="region" placeholder="us-east-1" required />
+      </label>
+      <label>Knowledge Base ID (requerido)
+        <input name="knowledgeBaseId" required />
+      </label>
+      <label>Data Source ID (requerido)
+        <input name="dataSourceId" required />
+      </label>
+      <label>Descripción
+        <input name="description" 
+               value="Sincronización manual desde UI" />
+      </label>
+    </div>
+  </form>
+</dialog>
+```
+
+<Info>
+  AWS credentials must be configured in the chat settings before sync operations can be performed.
+</Info>
+
+## Sync Interface
+
+### Control Panel
+
+The sync panel provides controls for starting jobs and refreshing history:
+
+```html
+<section class="panel sync-panel">
+  <header class="chat-header">
+    <div class="chat-brand">
+      <h2 class="chat-title">Sincronización de Knowledge Base</h2>
+    </div>
+    <button class="ghost icon-btn" 
+            id="openSyncConfig" 
+            aria-label="Configurar sincronización">
+      ⚙
+    </button>
+  </header>
+  
+  <div class="chat-main">
+    <section class="section" id="syncSection">
+      <p class="hint">
+        Ejecuta tareas de sincronización y revisa los logs de cada ejecución.
+      </p>
+      <div class="row" style="margin-top:8px;">
+        <button class="primary" id="startSync">
+          Ejecutar sincronización
+        </button>
+        <button class="ghost icon-btn" 
+                id="refreshSyncHistory" 
+                aria-label="Actualizar historial AWS" 
+                style="margin-left:auto;">
+          ↻
+        </button>
+      </div>
+      <p class="estado" id="syncStatus">Sin ejecuciones.</p>
+      <div id="executions"></div>
+    </section>
+  </div>
+</section>
+```
+
+## Starting Sync Jobs
+
+### POST Endpoint - Start Sync
+
+The sync API initiates ingestion jobs and monitors their progress:
+
+```typescript
+// From src/pages/api/sync.ts
+import {
+  BedrockAgentClient,
+  StartIngestionJobCommand,
+  GetIngestionJobCommand
+} from '@aws-sdk/client-bedrock-agent';
+
+type SyncStatus = 'PENDIENTE' | 'EN_EJECUCION' | 'COMPLETADO' | 'FALLIDO';
+
+type SyncExecution = {
+  id: string;
+  status: SyncStatus;
+  logs: string[];
+  startedAt: string;
+  finishedAt?: string;
+};
+
+type StartSyncRequest = {
+  region: string;
+  knowledgeBaseId: string;
+  dataSourceId: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken?: string;
+  description?: string;
+};
+
+const executions = new Map<string, SyncExecution>();
+
+export const POST: APIRoute = async ({ request }) => {
+  const payload = await request.json() as StartSyncRequest;
+
+  if (!payload.region || !payload.knowledgeBaseId || 
+      !payload.dataSourceId || !payload.accessKeyId || 
+      !payload.secretAccessKey) {
+    return new Response(JSON.stringify({ 
+      error: 'Faltan parámetros de sincronización.' 
+    }), { status: 400 });
+  }
+
+  const executionId = crypto.randomUUID();
+
+  executions.set(executionId, {
+    id: executionId,
+    status: 'PENDIENTE',
+    logs: [`[${new Date().toLocaleString('es-ES')}] Ejecución creada.`],
+    startedAt: new Date().toISOString()
+  });
+
+  // Start async sync process
+  void runSyncProcess(executionId, payload);
+
+  return new Response(JSON.stringify({ executionId }), {
+    status: 202,
+    headers: { 'Content-Type': 'application/json' }
+  });
+};
+```
+
+<Note>
+  The sync endpoint returns immediately with a 202 status and execution ID. The actual sync process runs asynchronously.
+</Note>
+
+### Async Sync Process
+
+The sync process starts an ingestion job and polls for completion:
+
+```typescript
+const wait = (ms: number): Promise<void> => 
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+const addLog = (executionId: string, message: string): void => {
+  const execution = executions.get(executionId);
+  if (!execution) return;
+  execution.logs.push(`[${new Date().toLocaleString('es-ES')}] ${message}`);
+};
+
+const runSyncProcess = async (
+  executionId: string, 
+  payload: StartSyncRequest
+): Promise<void> => {
+  try {
+    const execution = executions.get(executionId);
+    if (!execution) return;
+
+    execution.status = 'EN_EJECUCION';
+
+    const client = new BedrockAgentClient({
+      region: payload.region,
+      credentials: {
+        accessKeyId: payload.accessKeyId,
+        secretAccessKey: payload.secretAccessKey,
+        sessionToken: payload.sessionToken || undefined
+      }
+    });
+
+    addLog(executionId, 'Iniciando tarea de sincronización en Bedrock Knowledge Base...');
+
+    // Start ingestion job
+    const startResponse = await client.send(
+      new StartIngestionJobCommand({
+        knowledgeBaseId: payload.knowledgeBaseId,
+        dataSourceId: payload.dataSourceId,
+        description: payload.description || 
+          'Sincronización ejecutada desde la interfaz de chat'
+      })
+    );
+
+    const ingestionJobId = startResponse.ingestionJob?.ingestionJobId;
+
+    if (!ingestionJobId) {
+      throw new Error('No se recibió un ingestionJobId en la respuesta.');
+    }
+
+    addLog(executionId, `Ingestion Job iniciado: ${ingestionJobId}`);
+
+    let currentStatus = startResponse.ingestionJob?.status;
+
+    // Poll for completion
+    while (currentStatus === 'STARTING' || currentStatus === 'IN_PROGRESS') {
+      await wait(4000);
+
+      const statusResponse = await client.send(
+        new GetIngestionJobCommand({
+          knowledgeBaseId: payload.knowledgeBaseId,
+          dataSourceId: payload.dataSourceId,
+          ingestionJobId
+        })
+      );
+
+      currentStatus = statusResponse.ingestionJob?.status;
+      addLog(executionId, `Estado actual: ${currentStatus || 'DESCONOCIDO'}`);
+    }
+
+    // Handle completion
+    if (currentStatus === 'COMPLETE') {
+      execution.status = 'COMPLETADO';
+      execution.finishedAt = new Date().toISOString();
+      addLog(executionId, 'Sincronización completada correctamente.');
+      return;
+    }
+
+    execution.status = 'FALLIDO';
+    execution.finishedAt = new Date().toISOString();
+    addLog(executionId, `Sincronización finalizó con estado: ${currentStatus || 'DESCONOCIDO'}`);
+  } catch (error) {
+    const execution = executions.get(executionId);
+    if (!execution) return;
+
+    execution.status = 'FALLIDO';
+    execution.finishedAt = new Date().toISOString();
+    const message = error instanceof Error ? error.message : 
+      'Error no controlado en sincronización';
+    addLog(executionId, `Error: ${message}`);
+  }
+};
+```
+
+### GET Endpoint - Check Status
+
+Query the status of a specific execution:
+
+```typescript
+export const GET: APIRoute = async ({ url }) => {
+  const executionId = url.searchParams.get('executionId') || '';
+
+  if (!executionId || !executions.has(executionId)) {
+    return new Response(JSON.stringify({ 
+      error: 'No se encontró la ejecución solicitada.' 
+    }), { status: 404 });
+  }
+
+  const execution = executions.get(executionId)!;
+
+  return new Response(JSON.stringify(execution), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' }
+  });
+};
+```
+
+## Execution History
+
+### Fetching AWS History
+
+Retrieve historical ingestion jobs from AWS:
+
+```typescript
+// From src/pages/api/sync-history.ts
+import { 
+  BedrockAgentClient, 
+  ListIngestionJobsCommand 
+} from '@aws-sdk/client-bedrock-agent';
+
+type SyncHistoryRequest = {
+  region: string;
+  knowledgeBaseId: string;
+  dataSourceId: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken?: string;
+  maxResults?: number;
+};
+
+type UiSyncStatus = 'PENDIENTE' | 'EN_EJECUCION' | 'COMPLETADO' | 'FALLIDO';
+
+const mapAwsStatusToUiStatus = (status?: string): UiSyncStatus => {
+  if (status === 'COMPLETE') return 'COMPLETADO';
+  if (status === 'FAILED') return 'FALLIDO';
+  if (status === 'IN_PROGRESS' || status === 'STARTING') return 'EN_EJECUCION';
+  return 'PENDIENTE';
+};
+
+export const POST: APIRoute = async ({ request }) => {
+  const payload = await request.json() as SyncHistoryRequest;
+
+  if (!payload.region || !payload.knowledgeBaseId || 
+      !payload.dataSourceId || !payload.accessKeyId || 
+      !payload.secretAccessKey) {
+    return new Response(JSON.stringify({ 
+      error: 'Faltan parámetros para consultar historial de sincronización.' 
+    }), { status: 400 });
+  }
+
+  const client = new BedrockAgentClient({
+    region: payload.region,
+    credentials: {
+      accessKeyId: payload.accessKeyId,
+      secretAccessKey: payload.secretAccessKey,
+      sessionToken: payload.sessionToken || undefined
+    }
+  });
+
+  const maxResults = Math.min(Math.max(Number(payload.maxResults || 30), 1), 100);
+
+  const listResponse = await client.send(
+    new ListIngestionJobsCommand({
+      knowledgeBaseId: payload.knowledgeBaseId,
+      dataSourceId: payload.dataSourceId,
+      maxResults
+    })
+  );
+
+  const executions = (listResponse.ingestionJobSummaries || []).map((job) => {
+    const startedAt = job.startedAt ? 
+      new Date(job.startedAt).toISOString() : 
+      new Date().toISOString();
+    const finishedAt = job.updatedAt ? 
+      new Date(job.updatedAt).toISOString() : 
+      undefined;
+    const awsStatus = job.status || 'UNKNOWN';
+    const uiStatus = mapAwsStatusToUiStatus(awsStatus);
+    const ingestionJobId = job.ingestionJobId || 'sin-id';
+
+    return {
+      id: `aws-${ingestionJobId}`,
+      source: 'AWS',
+      jobId: ingestionJobId,
+      status: uiStatus,
+      startedAt,
+      finishedAt,
+      logs: [
+        `[${new Date().toLocaleString('es-ES')}] Historial recuperado desde AWS.`,
+        `Ingestion Job ID: ${ingestionJobId}`,
+        `Estado AWS: ${awsStatus}`,
+        `Iniciado: ${new Date(startedAt).toLocaleString('es-ES')}`,
+        `Última actualización: ${finishedAt ? new Date(finishedAt).toLocaleString('es-ES') : 'No disponible'}`
+      ]
+    };
+  });
+
+  return new Response(JSON.stringify({ executions }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' }
+  });
+};
+```
+
+### Merging Executions
+
+Local and AWS executions are merged to provide a complete view:
+
+```javascript
+const mergeExecutions = (incomingExecutions) => {
+  const map = new Map();
+
+  // Add existing local executions
+  state.executions.forEach((exec) => {
+    if (!exec?.id) return;
+    map.set(exec.id, exec);
+  });
+
+  // Merge incoming AWS executions
+  (incomingExecutions || []).forEach((exec) => {
+    if (!exec?.id) return;
+    const previous = map.get(exec.id) || {};
+    map.set(exec.id, {
+      ...previous,
+      ...exec,
+      logs: Array.isArray(exec.logs) && exec.logs.length > 0 ? 
+        exec.logs : previous.logs || []
+    });
+  });
+
+  state.executions = Array.from(map.values());
+};
+```
+
+## Execution Display
+
+### Rendering Executions
+
+Executions are displayed as expandable details elements:
+
+```javascript
+const renderExecutions = () => {
+  el.executions.innerHTML = '';
+  
+  const ordered = clone(state.executions).sort((a, b) => {
+    const aTime = new Date(a.startedAt || 0).getTime();
+    const bTime = new Date(b.startedAt || 0).getTime();
+    return aTime - bTime;
+  });
+
+  if (ordered.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'hint';
+    empty.textContent = 'No hay ejecuciones previas registradas.';
+    el.executions.appendChild(empty);
+    return;
+  }
+
+  ordered.forEach((exec) => {
+    const wrapper = document.createElement('details');
+    wrapper.className = 'sync-exec';
+    const isRunning = exec.status === 'PENDIENTE' || 
+                      exec.status === 'EN_EJECUCION';
+    wrapper.open = isRunning;
+
+    const startedAt = formatDateTime(exec.startedAt);
+    const finishedAt = exec.finishedAt ? 
+      formatDateTime(exec.finishedAt) : 'En progreso';
+    const titleId = exec.jobId || exec.id || 'sin-id';
+    const sourceLabel = exec.source ? `${exec.source} · ` : '';
+
+    wrapper.innerHTML = `
+      <summary class="sync-exec-summary">
+        <span class="sync-exec-meta">
+          <span class="sync-exec-title">
+            ${escapeHtml(sourceLabel)}Job ${escapeHtml(titleId)}
+          </span>
+          <span class="sync-exec-status">
+            ${escapeHtml(exec.status || 'DESCONOCIDO')}
+          </span>
+        </span>
+        <span class="sync-exec-time">${escapeHtml(startedAt)}</span>
+      </summary>
+      <div class="sync-exec-main">
+        <div><strong>Iniciado:</strong> ${escapeHtml(startedAt)}</div>
+        <div><strong>Finalizado:</strong> ${escapeHtml(finishedAt)}</div>
+        <div class="logs">
+          ${(exec.logs || []).map((item) => escapeHtml(item)).join('\n')}
+        </div>
+      </div>
+    `;
+    el.executions.appendChild(wrapper);
+  });
+};
+```
+
+### Execution Styling
+
+```css
+.sync-exec {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.sync-exec-summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: color-mix(in srgb, var(--surface) 92%, var(--secondary-bg));
+}
+
+.sync-exec-summary::after {
+  content: '▾';
+  font-size: 0.85rem;
+  color: var(--muted);
+  transition: transform 0.16s ease;
+}
+
+.sync-exec[open] .sync-exec-summary::after {
+  transform: rotate(180deg);
+}
+
+.sync-exec-main {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 6px;
+}
+
+.logs {
+  margin-top: 8px;
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--log-bg);
+  color: var(--log-text);
+  padding: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+```
+
+## Status Monitoring
+
+The UI automatically refreshes sync history when configured:
+
+```javascript
+const fetchSyncHistoryFromAws = async () => {
+  if (!isSyncConfigured()) return;
+
+  if (el.refreshSyncHistory) {
+    el.refreshSyncHistory.disabled = true;
+  }
+
+  setStatus(el.syncStatus, 'Actualizando historial desde AWS...');
+
+  try {
+    const response = await fetch('/api/sync-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...state.sync,
+        ...state.aws,
+        maxResults: 40
+      })
+    });
+
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(payload.error || 
+        'No se pudo cargar historial de sincronización desde AWS.');
+    }
+
+    mergeExecutions(payload.executions || []);
+    renderExecutions();
+    saveConfig();
+    setStatus(el.syncStatus, 
+      `Historial actualizado desde AWS (${(payload.executions || []).length} job(s)).`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 
+      'Error consultando historial de sincronización en AWS';
+    setStatus(el.syncStatus, message);
+  } finally {
+    if (el.refreshSyncHistory) {
+      el.refreshSyncHistory.disabled = !isSyncConfigured();
+    }
+  }
+};
+```
+
+## Configuration Summary
+
+The sync configuration is displayed in the summary panel:
+
+```javascript
+el.summarySync.textContent = state.sync.knowledgeBaseId
+  ? `KB Sync: ${state.sync.region} · KB ${state.sync.knowledgeBaseId} · DS ${state.sync.dataSourceId}`
+  : 'KB Sync: sin configurar.';
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Sync After Upload" icon="arrow-right">
+    Always sync after uploading new documents to make them available to the agent
+  </Card>
+  <Card title="Monitor Status" icon="eye">
+    Check execution logs to verify successful ingestion
+  </Card>
+  <Card title="AWS History" icon="cloud">
+    Regularly refresh AWS history to see jobs from other sources
+  </Card>
+  <Card title="Error Recovery" icon="rotate">
+    Review failed jobs and retry after fixing issues
+  </Card>
+</CardGroup>
+
+## Sync Status Values
+
+The system uses four status values:
+
+- **PENDIENTE**: Job created but not yet started
+- **EN_EJECUCION**: Job is currently processing (polling for completion)
+- **COMPLETADO**: Job finished successfully
+- **FALLIDO**: Job failed or encountered an error
+
+<Info>
+  AWS status values (STARTING, IN_PROGRESS, COMPLETE, FAILED) are automatically mapped to the UI status values.
+</Info>
+
+## Related Resources
+
+- [Chat Interface](/features/chat-interface) - Query your synced knowledge base
+- [Document Management](/features/document-management) - Upload documents before syncing
+- [API Reference](/api-reference/sync) - Complete sync API documentation

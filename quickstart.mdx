@@ -1,80 +1,314 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get started with Workshop Cloud Chat in minutes. Learn how to set up the application, configure AWS credentials, and start chatting with your Bedrock agent.
 ---
 
-## Get started in three steps
+Get Workshop Cloud Chat running on your local machine and send your first message to a Bedrock agent in just a few minutes.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+Before you begin, make sure you have:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+- **Node.js 18+** installed on your machine
+- **An AWS account** with access to Amazon Bedrock
+- **AWS CLI** configured (optional, but recommended)
+- **A Bedrock Agent** already created in your AWS account
+- **An S3 bucket** for document storage (optional, for knowledge base features)
 
-### Step 2: Deploy your changes
+<Note>
+If you don't have a Bedrock Agent yet, you'll need to create one in the AWS Console before proceeding. Visit the [AWS Bedrock documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/agents.html) to learn how to create an agent.
+</Note>
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+## Installation
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+<Steps>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+<Step title="Clone the repository">
 
-### Step 3: Go live
+Clone the Workshop Cloud Chat repository to your local machine:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+```bash
+git clone <your-repository-url>
+cd workshop-cloud-chat
+```
 
-## Next steps
+</Step>
 
-Now that you have your docs running, explore these key features:
+<Step title="Install dependencies">
+
+Install the required npm packages using your preferred package manager:
+
+<CodeGroup>
+
+```bash npm
+npm install
+```
+
+```bash yarn
+yarn install
+```
+
+```bash pnpm
+pnpm install
+```
+
+</CodeGroup>
+
+The application uses the following key dependencies:
+- `astro` - Web framework for building the UI
+- `@aws-sdk/client-bedrock-agent-runtime` - For interacting with Bedrock agents
+- `@aws-sdk/client-bedrock-agent` - For managing knowledge base sync
+- `@aws-sdk/client-s3` - For document uploads
+
+</Step>
+
+<Step title="Start the development server">
+
+Launch the application in development mode:
+
+<CodeGroup>
+
+```bash npm
+npm run dev
+```
+
+```bash yarn
+yarn dev
+```
+
+</CodeGroup>
+
+You should see output similar to:
+
+```
+🚀 astro v5.2.0 started in 245ms
+
+  ┃ Local    http://localhost:4321/
+  ┃ Network  use --host to expose
+```
+
+<Note>
+The application runs on port 4321 by default. If this port is already in use, Astro will automatically select a different port.
+</Note>
+
+</Step>
+
+</Steps>
+
+## AWS Configuration
+
+Before you can chat with your Bedrock agent, you need to configure your AWS credentials and agent settings.
+
+<Steps>
+
+<Step title="Open the application">
+
+Navigate to `http://localhost:4321` in your web browser. You'll see the Workshop Cloud Chat interface with configuration options.
+
+</Step>
+
+<Step title="Configure AWS credentials and Bedrock agent">
+
+Click the **⚙ settings icon** next to "Asistente Bedrock · Chat con Agente" to open the configuration dialog.
+
+Fill in the following required fields:
+
+**AWS Credentials:**
+- **AWS Access Key ID** - Your AWS access key (required)
+- **AWS Secret Access Key** - Your AWS secret key (required)
+- **AWS Session Token** - Only needed if using temporary credentials (optional)
+
+**Bedrock Agent Settings:**
+- **Region** - The AWS region where your agent is deployed (e.g., `us-east-1`)
+- **Agent ID** - Your Bedrock agent's unique identifier (e.g., `XXXXXXXXXX`)
+- **Agent Alias ID** - The agent alias ID (e.g., `TSTALIASID`)
+- **Session ID** - Leave empty to auto-generate (optional)
+
+<Warning>
+Never commit your AWS credentials to version control. The application stores credentials in browser localStorage for convenience during development.
+</Warning>
+
+Example configuration:
+
+```json
+{
+  "region": "us-east-1",
+  "agentId": "ABC123XYZ456",
+  "agentAliasId": "TSTALIASID",
+  "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+  "secretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+}
+```
+
+Click **Guardar** (Save) to apply your configuration.
+
+</Step>
+
+<Step title="Verify configuration">
+
+After saving, check the **"Resumen de configuración"** panel on the right side:
+
+- **AWS**: Should show "credenciales configuradas (YOUR_ACCESS_KEY_ID)"
+- **Agente**: Should display your region, agent ID, and alias
+- **S3**: "sin configurar" (unless you've configured S3)
+- **KB Sync**: "sin configurar" (unless you've configured knowledge base sync)
+
+</Step>
+
+</Steps>
+
+## Your First Chat Interaction
+
+Now that everything is configured, let's send your first message to the Bedrock agent.
+
+<Steps>
+
+<Step title="Enter your message">
+
+In the chat input field at the bottom of the main panel, type a message such as:
+
+```
+Hello! Can you help me understand what you can do?
+```
+
+</Step>
+
+<Step title="Send the message">
+
+Click the **Enviar** (Send) button or press `Enter` to send your message.
+
+The application will:
+1. Display your message in the chat window with a 👤 user icon
+2. Send an `InvokeAgentCommand` to AWS Bedrock with your message:
+
+```typescript
+const command = new InvokeAgentCommand({
+  agentId: body.agentId,
+  agentAliasId: body.agentAliasId,
+  sessionId,
+  inputText: latestUserMessage.content
+});
+```
+
+3. Stream the response back from the agent
+4. Display the agent's reply with a 🤖 assistant icon
+
+</Step>
+
+<Step title="View the response">
+
+The agent's response will appear in the chat window. Each message shows:
+- The role (Tú for user, Agente for assistant)
+- An emoji indicator (👤 or 🤖)
+- The message content
+
+</Step>
+
+<Step title="Enable debug mode (optional)">
+
+To see technical details about the API calls, check the **"Mostrar diagnóstico técnico"** checkbox below the message input.
+
+This displays the raw response payload, including:
+- The agent's reply text
+- Session ID for conversation tracking
+- Any errors that occurred
+
+```json
+{
+  "reply": "I'd be happy to help! I can assist you with...",
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+</Step>
+
+</Steps>
+
+## Understanding Sessions
+
+Workshop Cloud Chat uses session IDs to maintain conversation context with your Bedrock agent:
+
+- **Auto-generated sessions**: By default, a new session ID is created each time you reload the page
+- **Session persistence**: Within a session, the agent remembers previous messages
+- **Custom sessions**: You can specify a session ID in the configuration to resume a previous conversation
+
+From the API implementation in `src/pages/api/chat.ts:51`:
+
+```typescript
+const sessionId = body.sessionId?.trim() || crypto.randomUUID();
+```
+
+<Note>
+Sessions are managed by AWS Bedrock. Once you close the application, session history is maintained by AWS but not in the local application state.
+</Note>
+
+## Next Steps
+
+Congratulations! You've successfully set up Workshop Cloud Chat and sent your first message. Here's what to explore next:
 
 <CardGroup cols={2}>
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
+<Card title="Upload Documents" icon="file-pdf" href="/features/document-management">
+Learn how to upload PDF documents to S3 for your knowledge base
 </Card>
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
+<Card title="Knowledge Base Sync" icon="arrows-rotate" href="/features/knowledge-base-sync">
+Configure and run knowledge base synchronization jobs
 </Card>
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
+<Card title="Environment Variables" icon="gear" href="/deployment/environment-variables">
+Set up environment variables for production deployments
 </Card>
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
+<Card title="Deploy to AWS" icon="aws" href="/deployment/aws-amplify">
+Deploy your application to AWS Amplify
 </Card>
 
 </CardGroup>
 
+## Troubleshooting
+
+### Chat section is disabled
+
+If the chat section shows "Configura chat y credenciales para habilitar esta sección," make sure:
+- All required fields in the configuration dialog are filled
+- Your AWS credentials are valid
+- Your Bedrock agent exists in the specified region
+
+### Authentication errors
+
+```
+Error: The security token included in the request is invalid
+```
+
+This usually means:
+- Your AWS credentials are incorrect or expired
+- You need to include a session token if using temporary credentials
+- The IAM user/role doesn't have permission to invoke Bedrock agents
+
+Required IAM permissions:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "bedrock:InvokeAgent",
+      "bedrock:InvokeAgentWithResponseStream"
+    ],
+    "Resource": "*"
+  }]
+}
+```
+
+### Agent not responding
+
+If messages send but you receive no response:
+- Check that your Agent ID and Alias ID are correct
+- Verify the agent is deployed and active in the AWS Console
+- Enable debug mode to see the raw API response
+- Check your agent's CloudWatch logs for errors
+
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+For more detailed troubleshooting, visit the AWS Bedrock console and check your agent's execution logs.
 </Note>

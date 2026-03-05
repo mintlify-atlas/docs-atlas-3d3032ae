@@ -1,0 +1,383 @@
+---
+title: "Chat Interface"
+description: "Interactive chat interface powered by Amazon Bedrock agents with session management and debug capabilities"
+---
+
+## Overview
+
+The chat interface is the primary user interaction point in Workshop Cloud Chat. It provides a real-time conversational experience powered by Amazon Bedrock agents, with support for session management, theme customization, and technical diagnostics.
+
+<CardGroup cols={2}>
+  <Card title="Session Management" icon="clock">
+    Automatic session ID generation with persistent conversation context
+  </Card>
+  <Card title="Theme Toggle" icon="sun">
+    Light and dark mode support with smooth transitions
+  </Card>
+  <Card title="Debug Mode" icon="bug">
+    Technical diagnostics for troubleshooting API responses
+  </Card>
+  <Card title="Message History" icon="message">
+    Persistent message storage with role-based styling
+  </Card>
+</CardGroup>
+
+## Chat Configuration
+
+The chat interface requires configuration of AWS credentials and Bedrock agent parameters. Configuration is managed through a modal dialog and stored in browser localStorage.
+
+### Required Configuration
+
+<AccordionGroup>
+  <Accordion title="AWS Credentials">
+    - **Access Key ID** (required): Your AWS access key
+    - **Secret Access Key** (required): Your AWS secret key
+    - **Session Token** (optional): For temporary credentials
+  </Accordion>
+
+  <Accordion title="Bedrock Agent Settings">
+    - **Region** (required): AWS region where your agent is deployed (e.g., `us-east-1`)
+    - **Agent ID** (required): Unique identifier for your Bedrock agent
+    - **Agent Alias ID** (required): Alias ID for the agent version
+    - **Session ID** (optional): Auto-generated if not provided
+  </Accordion>
+</AccordionGroup>
+
+### Configuration Storage
+
+All configuration is persisted in localStorage under the key `workshop-cloud-chat-config-v1`:
+
+```typescript
+const STORAGE_KEY = 'workshop-cloud-chat-config-v1';
+
+const state = {
+  messages: [],
+  aws: {
+    accessKeyId: '',
+    secretAccessKey: '',
+    sessionToken: ''
+  },
+  bedrock: {
+    region: '',
+    agentId: '',
+    agentAliasId: '',
+    sessionId: ''
+  },
+  // ... other state
+};
+```
+
+## User Interface
+
+### Chat Header
+
+The header displays the application title and provides quick access to configuration:
+
+```html
+<header class="chat-header">
+  <div class="chat-brand">
+    <h1 class="chat-title">Asistente Bedrock · Chat con Agente (Amazon Bedrock)</h1>
+  </div>
+  <button class="ghost icon-btn" id="openChatConfig" 
+          aria-label="Configurar chat y credenciales">
+    ⚙
+  </button>
+</header>
+```
+
+### Message Display
+
+Messages are displayed in a scrollable container with role-based styling:
+
+<Note>
+  User messages appear on the right with a purple gradient background, while assistant messages appear on the left with a light blue background.
+</Note>
+
+```javascript
+const renderMessages = () => {
+  el.messages.innerHTML = '';
+
+  if (state.messages.length === 0) {
+    // Show empty state
+    const note = document.createElement('p');
+    note.className = 'empty-chat-note';
+    note.textContent = 'Aún no hay mensajes. Escribe tu primera consulta para iniciar el chat.';
+    el.messages.appendChild(note);
+    return;
+  }
+
+  state.messages.forEach((msg) => {
+    const isUser = msg.role === 'user';
+    const roleClass = isUser ? 'user' : 'assistant';
+    
+    // Create message bubble with emoji and text
+    const emoji = document.createElement('span');
+    emoji.textContent = isUser ? '👤' : '🤖';
+    
+    const text = document.createElement('span');
+    text.textContent = msg.content;
+    // ... styling and DOM manipulation
+  });
+};
+```
+
+### Theme Toggle
+
+The application supports light and dark themes with CSS custom properties:
+
+```css
+:root {
+  color-scheme: light;
+  --bg: #f4f2ff;
+  --surface: #ffffff;
+  --primary: #8453d2;
+  /* ... other light theme variables */
+}
+
+body[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #121524;
+  --surface: #1a1f33;
+  --primary: #9b73f0;
+  /* ... other dark theme variables */
+}
+```
+
+Theme selection is managed through a toggle switch:
+
+```javascript
+const applyTheme = () => {
+  const theme = state.ui.theme === 'dark' ? 'dark' : 'light';
+  document.body.setAttribute('data-theme', theme);
+  el.toggleTheme.checked = theme === 'dark';
+};
+```
+
+## Chat API Integration
+
+### Sending Messages
+
+Messages are sent to the `/api/chat` endpoint with full configuration:
+
+```typescript
+// From src/pages/api/chat.ts
+export const POST: APIRoute = async ({ request }) => {
+  const body = await request.json() as ChatRequest;
+
+  // Validate required parameters
+  if (!body.region || !body.agentId || !body.agentAliasId || 
+      !body.accessKeyId || !body.secretAccessKey) {
+    return new Response(JSON.stringify({ 
+      error: 'Faltan parámetros de configuración del agente Bedrock.' 
+    }), { status: 400 });
+  }
+
+  // Initialize Bedrock client
+  const client = new BedrockAgentRuntimeClient({
+    region: body.region,
+    credentials: {
+      accessKeyId: body.accessKeyId,
+      secretAccessKey: body.secretAccessKey,
+      sessionToken: body.sessionToken || undefined
+    }
+  });
+
+  // Extract latest user message
+  const latestUserMessage = [...(body.messages || [])]
+    .reverse()
+    .find((item) => item?.role === 'user' && item?.content?.trim());
+
+  // Generate session ID if not provided
+  const sessionId = body.sessionId?.trim() || crypto.randomUUID();
+
+  // Invoke agent
+  const command = new InvokeAgentCommand({
+    agentId: body.agentId,
+    agentAliasId: body.agentAliasId,
+    sessionId,
+    inputText: latestUserMessage.content
+  });
+
+  const response = await client.send(command);
+  // ... process streaming response
+};
+```
+
+### Response Processing
+
+The API processes streaming responses from Bedrock:
+
+```typescript
+const decoder = new TextDecoder();
+let reply = '';
+
+if (response.completion) {
+  for await (const chunkEvent of response.completion) {
+    const bytes = chunkEvent.chunk?.bytes;
+    if (bytes) {
+      reply += decoder.decode(bytes, { stream: true });
+    }
+  }
+  reply += decoder.decode();
+}
+
+const normalizedReply = reply.replace(/\u0000/g, '').trim();
+
+return new Response(JSON.stringify({ 
+  reply: normalizedReply || 'No se recibió texto del agente.', 
+  sessionId 
+}), { status: 200 });
+```
+
+## Session Management
+
+### Automatic Session Rotation
+
+Sessions are automatically rotated on page load to prevent context mixing:
+
+```javascript
+const rotateChatSessionOnPageLoad = () => {
+  const hasBedrockConfig = Boolean(
+    state.bedrock.region && 
+    state.bedrock.agentId && 
+    state.bedrock.agentAliasId
+  );
+  if (!hasBedrockConfig) return;
+  
+  state.bedrock.sessionId = crypto.randomUUID();
+  saveConfig();
+};
+```
+
+<Info>
+  Session rotation ensures each page load starts a fresh conversation, preventing message history from leaking between sessions.
+</Info>
+
+## Debug Mode
+
+### Technical Diagnostics
+
+Debug mode displays the raw API response for troubleshooting:
+
+```html
+<label class="chat-debug-toggle" for="toggleChatDebug">
+  <input type="checkbox" id="toggleChatDebug" />
+  Mostrar diagnóstico técnico
+</label>
+
+<details class="chat-debug">
+  <summary><strong>Diagnóstico de respuesta</strong></summary>
+  <pre id="chatDebugPayload">Sin solicitudes aún.</pre>
+</details>
+```
+
+Debug visibility is controlled via state:
+
+```javascript
+const applyDebugVisibility = () => {
+  const debugEnabled = Boolean(state.ui.chatDebug);
+  el.toggleChatDebug.checked = debugEnabled;
+  el.chatDebugPanel.hidden = !debugEnabled;
+};
+```
+
+### Debug Payload Display
+
+The debug panel shows the complete request/response cycle:
+
+```javascript
+// When debug mode is enabled, store the raw response
+el.chatDebugPayload.textContent = JSON.stringify({
+  request: {
+    agentId: state.bedrock.agentId,
+    sessionId: state.bedrock.sessionId,
+    message: userMessage
+  },
+  response: apiResponse
+}, null, 2);
+```
+
+## Input Handling
+
+### Message Input
+
+The textarea supports keyboard shortcuts and auto-sizing:
+
+```html
+<textarea id="messageInput" 
+          placeholder="Escribe tu mensaje..."></textarea>
+<div class="row" style="margin-top:8px;">
+  <button class="primary" id="sendMessage">Enviar</button>
+</div>
+```
+
+### Section Availability
+
+The chat section is disabled until properly configured:
+
+```javascript
+const updateSectionAvailability = () => {
+  const chatReady = isBedrockConfigured();
+  
+  el.chatSection.classList.toggle('section-disabled', !chatReady);
+  el.messageInput.disabled = !chatReady;
+  el.sendMessage.disabled = !chatReady;
+  
+  el.chatSectionHint.textContent = chatReady
+    ? 'La sección de chat está habilitada.'
+    : 'Configura chat y credenciales para habilitar esta sección.';
+};
+
+const isBedrockConfigured = () =>
+  Boolean(
+    state.bedrock.region && 
+    state.bedrock.agentId && 
+    state.bedrock.agentAliasId && 
+    isAwsConfigured()
+  );
+```
+
+## Message Types
+
+The chat interface uses a simple message type structure:
+
+```typescript
+type ChatMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
+type ChatRequest = {
+  region: string;
+  agentId: string;
+  agentAliasId: string;
+  sessionId?: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken?: string;
+  messages: ChatMessage[];
+};
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Session IDs" icon="key">
+    Always use unique session IDs for different users or conversation contexts
+  </Card>
+  <Card title="Error Handling" icon="shield">
+    Implement proper error handling for network failures and API errors
+  </Card>
+  <Card title="Debug Mode" icon="wrench">
+    Use debug mode during development to troubleshoot API responses
+  </Card>
+  <Card title="Credentials" icon="lock">
+    Never commit AWS credentials to version control
+  </Card>
+</CardGroup>
+
+## Related Resources
+
+- [Document Management](/features/document-management) - Upload PDFs to enhance agent knowledge
+- [Knowledge Base Sync](/features/knowledge-base-sync) - Sync documents with Bedrock Knowledge Base
+- [API Reference](/api-reference/chat) - Complete chat API documentation

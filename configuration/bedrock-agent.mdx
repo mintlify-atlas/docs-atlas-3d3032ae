@@ -1,0 +1,373 @@
+---
+title: Bedrock Agent Configuration
+description: Configure Amazon Bedrock Agent for AI-powered chat functionality in Workshop Cloud Chat
+---
+
+## Overview
+
+The Bedrock Agent powers the AI chat functionality in Workshop Cloud Chat. It processes user messages and returns intelligent responses using Amazon Bedrock's agent runtime.
+
+<Info>
+  Make sure you have [configured AWS credentials](/configuration/aws-credentials) before setting up the Bedrock agent.
+</Info>
+
+## Required Parameters
+
+<ParamField path="region" type="string" required>
+  The AWS region where your Bedrock agent is deployed.
+  
+  **Example**: `us-east-1`, `us-west-2`
+  
+  **Placeholder**: `us-east-1`
+</ParamField>
+
+<ParamField path="agentId" type="string" required>
+  The unique identifier for your Bedrock agent.
+  
+  **Example**: `ABCDEFGHIJ`
+  
+  **Placeholder**: `XXXXXXXXXX`
+</ParamField>
+
+<ParamField path="agentAliasId" type="string" required>
+  The alias ID for the agent version you want to use.
+  
+  **Example**: `TSTALIASID` (test alias), or a production alias ID
+  
+  **Placeholder**: `TSTALIASID`
+</ParamField>
+
+<ParamField path="sessionId" type="string">
+  Optional session identifier for maintaining conversation context.
+  
+  - If left empty, a new UUID is automatically generated for each page load
+  - Provide a custom session ID to maintain conversation history across different contexts
+  - The session is rotated on each page load if agent is configured
+  
+  **Placeholder**: `Si se deja vacío, se genera automáticamente`
+</ParamField>
+
+## Configuration Steps
+
+<Steps>
+  <Step title="Open Configuration Dialog">
+    Click the gear icon (⚙) next to "Chat con Agente (Amazon Bedrock)" in the main chat panel.
+    
+    The configuration dialog titled "Configuración de chat y credenciales" will open.
+  </Step>
+  
+  <Step title="Configure AWS Credentials">
+    If not already configured, enter your AWS credentials in the "Credenciales AWS" section:
+    
+    - AWS Access Key ID (required)
+    - AWS Secret Access Key (required)
+    - AWS Session Token (optional)
+    
+    See [AWS Credentials](/configuration/aws-credentials) for detailed instructions.
+  </Step>
+  
+  <Step title="Enter Bedrock Agent Details">
+    In the "Agente Bedrock" section, provide your agent configuration:
+    
+    ```plaintext
+    Región (requerido): us-east-1
+    Agent ID (requerido): ABCDEFGHIJ
+    Agent Alias ID (requerido): TSTALIASID
+    Session ID (opcional): [Leave blank for auto-generation]
+    ```
+    
+    From `src/pages/index.astro:1010-1017`:
+    
+    ```html
+    <label>Región (requerido)<input name="region" placeholder="us-east-1" required /></label>
+    <label>Agent ID (requerido)<input name="agentId" placeholder="XXXXXXXXXX" required /></label>
+    <label>Agent Alias ID (requerido)<input name="agentAliasId" placeholder="TSTALIASID" required /></label>
+    <label>Session ID (opcional)<input name="sessionId" placeholder="Si se deja vacío, se genera automáticamente" /></label>
+    ```
+  </Step>
+  
+  <Step title="Save Configuration">
+    Click the **"Guardar"** button to save your configuration.
+    
+    The settings are persisted to browser localStorage.
+  </Step>
+  
+  <Step title="Verify Chat is Enabled">
+    After saving:
+    
+    - The chat section hint should change to: "La sección de chat está habilitada."
+    - The message input and send button should become enabled
+    - The configuration summary panel should show:
+      ```plaintext
+      Agente: us-east-1 · ABCDEFGHIJ · Alias TSTALIASID
+      ```
+  </Step>
+</Steps>
+
+## How It Works
+
+### Session Management
+
+The application automatically generates a new session ID on page load when agent is configured:
+
+From `src/pages/index.astro:1172-1177`:
+
+```javascript
+const rotateChatSessionOnPageLoad = () => {
+  const hasBedrockConfig = Boolean(state.bedrock.region && state.bedrock.agentId && state.bedrock.agentAliasId);
+  if (!hasBedrockConfig) return;
+  state.bedrock.sessionId = crypto.randomUUID();
+  saveConfig();
+};
+```
+
+### Chat API Request
+
+When you send a message, the application makes a POST request to `/api/chat` with:
+
+From `src/pages/api/chat.ts:9-18`:
+
+```typescript
+type ChatRequest = {
+  region: string;
+  agentId: string;
+  agentAliasId: string;
+  sessionId?: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken?: string;
+  messages: ChatMessage[];
+};
+```
+
+### Bedrock Client Initialization
+
+The API creates a Bedrock Agent Runtime client:
+
+From `src/pages/api/chat.ts:31-38`:
+
+```typescript
+const client = new BedrockAgentRuntimeClient({
+  region: body.region,
+  credentials: {
+    accessKeyId: body.accessKeyId,
+    secretAccessKey: body.secretAccessKey,
+    sessionToken: body.sessionToken || undefined
+  }
+});
+```
+
+### Invoking the Agent
+
+The agent is invoked with the latest user message:
+
+From `src/pages/api/chat.ts:53-58`:
+
+```typescript
+const command = new InvokeAgentCommand({
+  agentId: body.agentId,
+  agentAliasId: body.agentAliasId,
+  sessionId,
+  inputText: latestUserMessage.content
+});
+```
+
+### Processing the Response
+
+The streaming response is decoded and returned:
+
+From `src/pages/api/chat.ts:60-72`:
+
+```typescript
+const response = await client.send(command);
+const decoder = new TextDecoder();
+let reply = '';
+
+if (response.completion) {
+  for await (const chunkEvent of response.completion) {
+    const bytes = chunkEvent.chunk?.bytes;
+    if (bytes) {
+      reply += decoder.decode(bytes, { stream: true });
+    }
+  }
+  reply += decoder.decode();
+}
+```
+
+## Validation Logic
+
+The chat section is enabled only when all required configuration is present:
+
+From `src/pages/index.astro:1525-1526`:
+
+```javascript
+const isBedrockConfigured = () =>
+  Boolean(state.bedrock.region && state.bedrock.agentId && state.bedrock.agentAliasId && isAwsConfigured());
+```
+
+## Using the Chat Interface
+
+<Steps>
+  <Step title="Enter Your Message">
+    Type your question or message in the text area labeled "Escribe tu mensaje...".
+  </Step>
+  
+  <Step title="Send Message">
+    Click the **"Enviar"** button or press Enter to send your message.
+  </Step>
+  
+  <Step title="View Response">
+    The agent's response will appear in the messages area:
+    
+    - User messages appear on the right with a blue gradient background
+    - Agent responses appear on the left with a light blue background
+    - Each message shows an emoji indicator (👤 for user, 🤖 for agent)
+  </Step>
+  
+  <Step title="Enable Debug Mode (Optional)">
+    Check "Mostrar diagnóstico técnico" to view the raw API response for debugging.
+    
+    The debug panel shows the complete response payload from the Bedrock agent.
+  </Step>
+</Steps>
+
+## Error Handling
+
+The API validates all required parameters before invoking the agent:
+
+From `src/pages/api/chat.ts:24-29`:
+
+```typescript
+if (!body.region || !body.agentId || !body.agentAliasId || !body.accessKeyId || !body.secretAccessKey) {
+  return new Response(JSON.stringify({ error: 'Faltan parámetros de configuración del agente Bedrock.' }), {
+    status: 400,
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+```
+
+## Finding Your Agent Details
+
+<Steps>
+  <Step title="Open AWS Console">
+    Navigate to the [Amazon Bedrock Console](https://console.aws.amazon.com/bedrock/).
+  </Step>
+  
+  <Step title="Select Region">
+    Ensure you're in the correct AWS region where your agent is deployed (visible in the top-right corner).
+  </Step>
+  
+  <Step title="Navigate to Agents">
+    In the left sidebar, click **Agents** under the Orchestration section.
+  </Step>
+  
+  <Step title="Find Agent ID">
+    - Click on your agent name
+    - The **Agent ID** is displayed on the agent details page
+    - Copy the 10-character identifier (e.g., `ABCDEFGHIJ`)
+  </Step>
+  
+  <Step title="Find Alias ID">
+    - Scroll down to the **Aliases** section
+    - Find the alias you want to use (e.g., "TestAlias" or "Production")
+    - Copy the **Alias ID** (e.g., `TSTALIASID`)
+  </Step>
+</Steps>
+
+## Configuration Summary
+
+After configuration, the right panel displays a summary:
+
+```plaintext
+Agente: us-east-1 · ABCDEFGHIJ · Alias TSTALIASID
+```
+
+From `src/pages/index.astro:1328-1330`:
+
+```javascript
+el.summaryBedrock.textContent = state.bedrock.agentId && state.bedrock.agentAliasId
+  ? `Agente: ${state.bedrock.region} · ${state.bedrock.agentId} · Alias ${state.bedrock.agentAliasId}`
+  : 'Agente Bedrock: sin configurar.';
+```
+
+## Managing Configuration
+
+### Clear Configuration
+
+To remove all chat and credential settings:
+
+1. Open the configuration dialog
+2. Click **"Borrar configuraciones"**
+3. This clears both AWS credentials and Bedrock agent settings
+
+### Cancel Without Saving
+
+To close the dialog without applying changes:
+
+1. Click **"Cancelar sin guardar"**
+2. The dialog closes and previous settings remain unchanged
+
+## Troubleshooting
+
+### Chat Section Disabled
+
+**Symptoms**: Message input and send button are disabled, hint shows "Configura chat y credenciales para habilitar esta sección."
+
+**Solutions**:
+- Verify AWS credentials are configured
+- Ensure region, agentId, and agentAliasId are all provided
+- Check the configuration summary panel for missing values
+
+### "Faltan parámetros de configuración del agente Bedrock" Error
+
+**Symptoms**: API returns 400 error when sending a message.
+
+**Solutions**:
+- Re-open configuration dialog and verify all required fields are filled
+- Check that no fields are empty or contain only whitespace
+- Save configuration again
+
+### "No hay mensajes para enviar" Error
+
+**Symptoms**: API returns 400 error even with text in the input.
+
+**Solutions**:
+- Ensure you've actually typed text in the message input
+- Check that the message isn't empty or only whitespace
+- Try typing a different message
+
+### Agent Not Responding
+
+**Symptoms**: Message is sent but no response appears.
+
+**Solutions**:
+- Enable debug mode to see the raw API response
+- Check AWS console for agent status and logs
+- Verify the agent alias is working and not disabled
+- Check IAM permissions for Bedrock access
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Test Alias for Development" icon="flask">
+    Use the test alias (TSTALIASID) during development, and switch to a production alias for live use.
+  </Card>
+  
+  <Card title="Monitor Agent Performance" icon="gauge">
+    Use Amazon CloudWatch to monitor agent invocations, latency, and errors.
+  </Card>
+  
+  <Card title="Set Proper IAM Permissions" icon="key">
+    Ensure your IAM user/role has `bedrock:InvokeAgent` permission for the specific agent.
+  </Card>
+  
+  <Card title="Review Agent Logs" icon="file-lines">
+    Check CloudWatch logs for your agent to debug issues and understand behavior.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+- [Configure S3 Setup](/configuration/s3-setup) to enable document uploads
+- [Configure Knowledge Base](/configuration/knowledge-base) for document synchronization
+- Learn about [Using the Chat Interface](/guides/using-chat)

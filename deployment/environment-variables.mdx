@@ -1,0 +1,228 @@
+---
+title: 'Environment Variables'
+description: 'Configuration and environment variables for Workshop Cloud Chat deployment'
+---
+
+Workshop Cloud Chat is designed with security in mind - AWS credentials are provided by users through the application interface rather than stored as server-side environment variables.
+
+## Architecture Overview
+
+Unlike traditional applications that store API keys server-side, Workshop Cloud Chat uses a **client-provided credentials model**:
+
+- Users enter their AWS credentials directly in the browser UI
+- Credentials are sent with each API request to `/api/chat`
+- The server creates a temporary AWS Bedrock client for each request
+- Credentials are never stored or logged
+
+<Note>
+This architecture ensures that:
+- Each user uses their own AWS account and quotas
+- No shared credentials means no shared security risks
+- Users have full control over their AWS access
+</Note>
+
+## Required User-Provided Credentials
+
+Users must provide the following through the application UI:
+
+### AWS Bedrock Configuration
+
+<CodeGroup>
+
+```typescript Required Fields
+{
+  region: string;           // e.g., "us-east-1"
+  agentId: string;          // Bedrock Agent ID
+  agentAliasId: string;     // Bedrock Agent Alias ID
+  accessKeyId: string;      // AWS Access Key ID
+  secretAccessKey: string;  // AWS Secret Access Key
+  sessionToken?: string;    // Optional: for temporary credentials
+}
+```
+
+```typescript Example
+{
+  region: "us-east-1",
+  agentId: "ABCD1234EFGH",
+  agentAliasId: "TSTALIASID",
+  accessKeyId: "AKIAIOSFODNN7EXAMPLE",
+  secretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+  sessionToken: "FwoGZXIvYXdzEBa..." // Optional
+}
+```
+
+</CodeGroup>
+
+## Optional Environment Variables
+
+While the core application doesn't require server-side environment variables, you may want to configure these for specific use cases:
+
+### Development Environment
+
+```bash .env.local
+# Astro development server
+PORT=4321
+HOST=0.0.0.0
+
+# Enable detailed logging (development only)
+NODE_ENV=development
+```
+
+### Production Optimizations
+
+```bash
+# Node.js environment
+NODE_ENV=production
+
+# Optional: Adjust Lambda timeout in Amplify Console
+# (Not an env var, but configure in AWS)
+LAMBDA_TIMEOUT=30
+```
+
+<Warning>
+**Never set these in environment variables:**
+- AWS_ACCESS_KEY_ID
+- AWS_SECRET_ACCESS_KEY
+- AWS_SESSION_TOKEN
+
+These should only be provided by users through the application interface.
+</Warning>
+
+## Security Best Practices
+
+### For Deployment
+
+<Steps>
+  <Step title="No Hardcoded Credentials">
+    Ensure your repository never contains hardcoded AWS credentials:
+
+    ```bash
+    # Add to .gitignore
+    .env
+    .env.local
+    .env.*.local
+    ```
+  </Step>
+
+  <Step title="IAM Permissions">
+    Users should create IAM credentials with minimal required permissions:
+
+    ```json
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "bedrock:InvokeAgent"
+          ],
+          "Resource": "arn:aws:bedrock:*:*:agent/*"
+        }
+      ]
+    }
+    ```
+  </Step>
+
+  <Step title="HTTPS Only">
+    Always deploy on HTTPS to protect credentials in transit. AWS Amplify provides SSL certificates automatically.
+  </Step>
+</Steps>
+
+### For End Users
+
+<Note>
+Recommend these practices to your users:
+
+- **Use IAM Users**: Create dedicated IAM users for the application, not root credentials
+- **Temporary Credentials**: Consider AWS STS for temporary credentials with `sessionToken`
+- **Credential Rotation**: Regularly rotate access keys
+- **Monitor Usage**: Check AWS CloudTrail for unexpected API calls
+</Note>
+
+## API Request Flow
+
+Here's how credentials are used in each request:
+
+```typescript src/pages/api/chat.ts
+// 1. User credentials received from client
+const body = await request.json() as ChatRequest;
+
+// 2. Validate required fields
+if (!body.accessKeyId || !body.secretAccessKey) {
+  return new Response(JSON.stringify({ 
+    error: 'Missing AWS credentials' 
+  }), { status: 400 });
+}
+
+// 3. Create temporary Bedrock client
+const client = new BedrockAgentRuntimeClient({
+  region: body.region,
+  credentials: {
+    accessKeyId: body.accessKeyId,
+    secretAccessKey: body.secretAccessKey,
+    sessionToken: body.sessionToken || undefined
+  }
+});
+
+// 4. Make Bedrock API call
+const response = await client.send(command);
+
+// 5. Client is destroyed after request completes
+```
+
+<Note>
+Each request creates a new AWS SDK client with the provided credentials. The client is automatically garbage collected after the request, ensuring credentials are never persisted.
+</Note>
+
+## Configuration Validation
+
+The API endpoint validates all required parameters:
+
+```typescript
+if (!body.region || !body.agentId || !body.agentAliasId || 
+    !body.accessKeyId || !body.secretAccessKey) {
+  return new Response(JSON.stringify({ 
+    error: 'Missing Bedrock agent configuration parameters.' 
+  }), { status: 400 });
+}
+```
+
+Missing credentials result in a `400 Bad Request` response, prompting users to provide the required information.
+
+## Deployment Checklist
+
+Before deploying to production:
+
+- [ ] Remove any hardcoded credentials from code
+- [ ] Verify `.gitignore` includes `.env*` files
+- [ ] Configure HTTPS (automatic with AWS Amplify)
+- [ ] Test with temporary AWS credentials
+- [ ] Document credential requirements for end users
+- [ ] Set up CloudWatch logging for API errors
+- [ ] Configure appropriate Lambda timeout in Amplify Console
+
+## Troubleshooting
+
+### "Missing AWS credentials" Error
+
+**Cause**: User hasn't provided credentials through the UI
+
+**Solution**: Ensure your application UI collects all required fields before making API requests
+
+### "Access Denied" Error
+
+**Cause**: User's IAM credentials lack Bedrock permissions
+
+**Solution**: Users need `bedrock:InvokeAgent` permission for their agent resources
+
+### "Invalid Session Token" Error
+
+**Cause**: Temporary credentials have expired
+
+**Solution**: Users should refresh their STS credentials and reconnect
+
+## Next Steps
+
+- Review the [API Reference](/api-reference/chat-endpoint) for complete parameter details
+- Learn about [AWS Amplify deployment](/deployment/aws-amplify)
+- Explore [AWS IAM best practices](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html)

@@ -1,0 +1,173 @@
+---
+title: 'Deploy to AWS Amplify'
+description: 'Learn how to deploy Workshop Cloud Chat to AWS Amplify using the astro-aws-amplify adapter'
+---
+
+Workshop Cloud Chat uses the `astro-aws-amplify` adapter to deploy seamlessly to AWS Amplify. This adapter automatically configures your Astro application for Amplify's serverless infrastructure.
+
+## Prerequisites
+
+Before deploying, ensure you have:
+
+- An AWS account with Amplify access
+- Your application code in a Git repository (GitHub, GitLab, Bitbucket, or AWS CodeCommit)
+- AWS credentials configured for your Bedrock Agent (see [Environment Variables](/deployment/environment-variables))
+
+## Adapter Configuration
+
+The application is pre-configured with the AWS Amplify adapter in `astro.config.mjs`:
+
+```javascript astro.config.mjs
+import { defineConfig } from 'astro/config';
+import awsAmplify from 'astro-aws-amplify';
+
+export default defineConfig({
+  output: "server",
+  adapter: awsAmplify(),
+});
+```
+
+<Note>
+The `output: "server"` mode enables server-side rendering (SSR), which is required for the chat API endpoints to function properly.
+</Note>
+
+## Deployment Steps
+
+<Steps>
+  <Step title="Connect Your Repository">
+    1. Sign in to the [AWS Amplify Console](https://console.aws.amazon.com/amplify/)
+    2. Click **New app** → **Host web app**
+    3. Select your Git provider and authorize AWS Amplify
+    4. Choose the repository containing your Workshop Cloud Chat code
+    5. Select the branch you want to deploy (e.g., `main` or `production`)
+  </Step>
+
+  <Step title="Configure Build Settings">
+    Amplify should automatically detect the Astro framework. Verify the build settings:
+
+    ```yaml amplify.yml
+    version: 1
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - yarn install
+        build:
+          commands:
+            - yarn build
+      artifacts:
+        baseDirectory: .amplify-hosting
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - node_modules/**/*
+    ```
+
+    <Note>
+    The `astro-aws-amplify` adapter automatically generates the `.amplify-hosting` directory during the build process with the correct structure for Amplify deployment.
+    </Note>
+  </Step>
+
+  <Step title="Set Environment Variables">
+    While Workshop Cloud Chat accepts AWS credentials through the UI, you may want to set other environment variables:
+
+    1. In the Amplify Console, navigate to your app
+    2. Go to **App settings** → **Environment variables**
+    3. Add any required variables (see [Environment Variables](/deployment/environment-variables))
+
+    <Warning>
+    Never hardcode AWS credentials in your application code or environment variables. Users should provide their own credentials through the application interface.
+    </Warning>
+  </Step>
+
+  <Step title="Deploy Your Application">
+    1. Click **Save and deploy**
+    2. Amplify will start building and deploying your application
+    3. Monitor the build logs for any errors
+    4. Once complete, your app will be available at the provided Amplify URL
+  </Step>
+</Steps>
+
+## Build Configuration Details
+
+### How the Adapter Works
+
+The `astro-aws-amplify` adapter:
+
+1. **Converts SSR Routes**: Transforms your Astro API endpoints (like `/api/chat`) into Lambda-compatible functions
+2. **Optimizes Static Assets**: Bundles static files for efficient delivery through Amplify's CDN
+3. **Generates Amplify Structure**: Creates the `.amplify-hosting` directory with:
+   - `compute/default/` - Lambda function code for SSR routes
+   - `static/` - Static assets (CSS, JS, images)
+   - `deploy-manifest.json` - Routing and deployment configuration
+
+### Package Manager
+
+Workshop Cloud Chat uses **Yarn 1.22.22** as specified in `package.json`. Amplify will automatically detect this and use Yarn for dependency installation.
+
+## Continuous Deployment
+
+Once configured, AWS Amplify automatically:
+
+- Builds and deploys on every push to your connected branch
+- Provides preview URLs for pull requests (if enabled)
+- Rolls back to previous versions if a build fails
+
+## Monitoring and Logs
+
+Access deployment and runtime logs:
+
+1. **Build Logs**: Available in the Amplify Console under **Build history**
+2. **Function Logs**: View Lambda logs in CloudWatch (linked from the Amplify Console)
+3. **Access Logs**: Monitor traffic patterns in the **Monitoring** tab
+
+## Custom Domain
+
+To use a custom domain:
+
+<Steps>
+  <Step title="Add Domain">
+    In the Amplify Console, go to **App settings** → **Domain management** → **Add domain**
+  </Step>
+
+  <Step title="Configure DNS">
+    Follow the prompts to verify domain ownership and configure DNS records
+  </Step>
+
+  <Step title="SSL Certificate">
+    Amplify automatically provisions and manages SSL certificates via AWS Certificate Manager
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Build Failures
+
+If your build fails:
+
+- Check the build logs in the Amplify Console
+- Verify all dependencies are listed in `package.json`
+- Ensure the `astro-aws-amplify` adapter version is compatible (currently `0.2.4`)
+
+### API Endpoint Errors
+
+If the `/api/chat` endpoint returns errors:
+
+- Verify the Lambda function has sufficient timeout (default is 10 seconds, increase if needed)
+- Check CloudWatch logs for detailed error messages
+- Ensure users are providing valid AWS credentials through the UI
+
+### Cold Start Performance
+
+Lambda functions may experience cold starts:
+
+- First request after idle period may take 1-3 seconds
+- Consider AWS Lambda Provisioned Concurrency for high-traffic applications
+- The adapter automatically optimizes bundle size to minimize cold start time
+
+## Next Steps
+
+- Configure [Environment Variables](/deployment/environment-variables) for your production environment
+- Set up monitoring and alerting in AWS CloudWatch
+- Review AWS Amplify pricing to understand costs

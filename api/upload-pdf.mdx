@@ -1,0 +1,391 @@
+---
+title: /api/upload-pdf
+description: Upload, list, and delete PDF documents in S3 buckets
+---
+
+## Overview
+
+The `/api/upload-pdf` endpoint provides three methods for managing PDF documents in Amazon S3:
+
+- **POST**: Upload a PDF document
+- **GET**: List all PDF documents in a bucket
+- **DELETE**: Delete a specific PDF document
+
+---
+
+## POST /api/upload-pdf
+
+Upload a PDF document to an S3 bucket.
+
+### Request
+
+The request must be sent as `multipart/form-data` with the following fields:
+
+<ParamField path="file" type="File" required>
+  The PDF file to upload (must have `application/pdf` content type)
+</ParamField>
+
+<ParamField path="region" type="string" required>
+  AWS region where your S3 bucket is located (e.g., `us-east-1`)
+</ParamField>
+
+<ParamField path="bucketName" type="string" required>
+  The name of your S3 bucket
+</ParamField>
+
+<ParamField path="accessKeyId" type="string" required>
+  AWS Access Key ID for authentication
+</ParamField>
+
+<ParamField path="secretAccessKey" type="string" required>
+  AWS Secret Access Key for authentication
+</ParamField>
+
+<ParamField path="sessionToken" type="string">
+  Optional AWS Session Token for temporary credentials
+</ParamField>
+
+<ParamField path="prefix" type="string">
+  S3 key prefix for organizing documents (default: `documentos`)
+</ParamField>
+
+### Response
+
+#### Success (200 OK)
+
+<ResponseField name="ok" type="boolean">
+  Always `true` on successful upload
+</ResponseField>
+
+<ResponseField name="bucketName" type="string">
+  The S3 bucket where the file was uploaded
+</ResponseField>
+
+<ResponseField name="key" type="string">
+  The full S3 key of the uploaded file (includes prefix and timestamp)
+</ResponseField>
+
+```json
+{
+  "ok": true,
+  "bucketName": "my-documents-bucket",
+  "key": "documentos/1709683200000-my_document.pdf"
+}
+```
+
+### File Key Format
+
+Uploaded files are stored with the following key format:
+
+```
+{prefix}/{timestamp}-{sanitized-filename}
+```
+
+The filename is sanitized to replace non-alphanumeric characters (except `.`, `_`, `-`) with underscores:
+
+```typescript
+const sanitizeFileName = (name: string): string => 
+  name.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+const key = `${prefix.replace(/\/$/, '')}/${Date.now()}-${sanitizeFileName(file.name)}`;
+```
+
+### Error Responses
+
+#### 400 Bad Request - Invalid File Type
+
+```json
+{
+  "error": "El archivo debe ser PDF."
+}
+```
+
+#### 400 Bad Request - Missing File
+
+```json
+{
+  "error": "Debe seleccionar un archivo PDF."
+}
+```
+
+#### 400 Bad Request - Missing Parameters
+
+```json
+{
+  "error": "Faltan parámetros de S3."
+}
+```
+
+#### 500 Internal Server Error
+
+```json
+{
+  "error": "Error message from AWS or internal error"
+}
+```
+
+### cURL Example
+
+```bash
+curl -X POST https://your-domain.com/api/upload-pdf \
+  -F "file=@document.pdf" \
+  -F "region=us-east-1" \
+  -F "bucketName=my-documents-bucket" \
+  -F "accessKeyId=AKIAIOSFODNN7EXAMPLE" \
+  -F "secretAccessKey=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" \
+  -F "prefix=documentos"
+```
+
+### JavaScript Example
+
+```javascript
+const formData = new FormData();
+formData.append('file', pdfFile);
+formData.append('region', 'us-east-1');
+formData.append('bucketName', 'my-documents-bucket');
+formData.append('accessKeyId', 'AKIAIOSFODNN7EXAMPLE');
+formData.append('secretAccessKey', 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY');
+formData.append('prefix', 'documentos');
+
+const response = await fetch('/api/upload-pdf', {
+  method: 'POST',
+  body: formData
+});
+
+const data = await response.json();
+console.log(data.key);
+```
+
+---
+
+## GET /api/upload-pdf
+
+List all PDF documents in an S3 bucket with a specific prefix.
+
+### Request Parameters
+
+Query string parameters:
+
+<ParamField query="region" type="string" required>
+  AWS region where your S3 bucket is located
+</ParamField>
+
+<ParamField query="bucketName" type="string" required>
+  The name of your S3 bucket
+</ParamField>
+
+<ParamField query="accessKeyId" type="string" required>
+  AWS Access Key ID for authentication
+</ParamField>
+
+<ParamField query="secretAccessKey" type="string" required>
+  AWS Secret Access Key for authentication
+</ParamField>
+
+<ParamField query="sessionToken" type="string">
+  Optional AWS Session Token for temporary credentials
+</ParamField>
+
+<ParamField query="prefix" type="string">
+  S3 key prefix to filter documents (default: `documentos`)
+</ParamField>
+
+### Response
+
+#### Success (200 OK)
+
+<ResponseField name="documents" type="array">
+  Array of document objects
+</ResponseField>
+
+<Expandable title="documents">
+  <ResponseField name="key" type="string">
+    Full S3 key of the document
+  </ResponseField>
+
+  <ResponseField name="size" type="number">
+    File size in bytes
+  </ResponseField>
+
+  <ResponseField name="lastModified" type="string">
+    ISO 8601 timestamp of last modification, or `null`
+  </ResponseField>
+</Expandable>
+
+```json
+{
+  "documents": [
+    {
+      "key": "documentos/1709683200000-report.pdf",
+      "size": 245678,
+      "lastModified": "2024-03-05T12:00:00.000Z"
+    },
+    {
+      "key": "documentos/1709683400000-summary.pdf",
+      "size": 89012,
+      "lastModified": "2024-03-05T12:03:20.000Z"
+    }
+  ]
+}
+```
+
+### Error Responses
+
+#### 400 Bad Request
+
+```json
+{
+  "error": "Faltan parámetros de S3 para listar documentos."
+}
+```
+
+#### 500 Internal Server Error
+
+```json
+{
+  "error": "Error message from AWS or internal error"
+}
+```
+
+### cURL Example
+
+```bash
+curl -X GET "https://your-domain.com/api/upload-pdf?region=us-east-1&bucketName=my-documents-bucket&accessKeyId=AKIAIOSFODNN7EXAMPLE&secretAccessKey=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY&prefix=documentos"
+```
+
+### JavaScript Example
+
+```javascript
+const params = new URLSearchParams({
+  region: 'us-east-1',
+  bucketName: 'my-documents-bucket',
+  accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+  secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+  prefix: 'documentos'
+});
+
+const response = await fetch(`/api/upload-pdf?${params}`);
+const data = await response.json();
+
+console.log(`Found ${data.documents.length} documents`);
+data.documents.forEach(doc => {
+  console.log(`${doc.key} - ${doc.size} bytes`);
+});
+```
+
+---
+
+## DELETE /api/upload-pdf
+
+Delete a specific PDF document from an S3 bucket.
+
+### Request Body
+
+The request must be sent as JSON:
+
+<ParamField path="region" type="string" required>
+  AWS region where your S3 bucket is located
+</ParamField>
+
+<ParamField path="bucketName" type="string" required>
+  The name of your S3 bucket
+</ParamField>
+
+<ParamField path="key" type="string" required>
+  The full S3 key of the document to delete
+</ParamField>
+
+<ParamField path="accessKeyId" type="string" required>
+  AWS Access Key ID for authentication
+</ParamField>
+
+<ParamField path="secretAccessKey" type="string" required>
+  AWS Secret Access Key for authentication
+</ParamField>
+
+<ParamField path="sessionToken" type="string">
+  Optional AWS Session Token for temporary credentials
+</ParamField>
+
+### Response
+
+#### Success (200 OK)
+
+<ResponseField name="ok" type="boolean">
+  Always `true` on successful deletion
+</ResponseField>
+
+<ResponseField name="key" type="string">
+  The S3 key of the deleted document
+</ResponseField>
+
+```json
+{
+  "ok": true,
+  "key": "documentos/1709683200000-report.pdf"
+}
+```
+
+### Error Responses
+
+#### 400 Bad Request
+
+```json
+{
+  "error": "Faltan parámetros de S3 para eliminar el documento."
+}
+```
+
+#### 500 Internal Server Error
+
+```json
+{
+  "error": "Error message from AWS or internal error"
+}
+```
+
+### cURL Example
+
+```bash
+curl -X DELETE https://your-domain.com/api/upload-pdf \
+  -H "Content-Type: application/json" \
+  -d '{
+    "region": "us-east-1",
+    "bucketName": "my-documents-bucket",
+    "key": "documentos/1709683200000-report.pdf",
+    "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+    "secretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  }'
+```
+
+### JavaScript Example
+
+```javascript
+const response = await fetch('/api/upload-pdf', {
+  method: 'DELETE',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    region: 'us-east-1',
+    bucketName: 'my-documents-bucket',
+    key: 'documentos/1709683200000-report.pdf',
+    accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+    secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
+  })
+});
+
+const data = await response.json();
+console.log(`Deleted: ${data.key}`);
+```
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Document Management" icon="file-pdf" href="/features/document-management">
+    Learn about the document management interface
+  </Card>
+  <Card title="S3 Setup" icon="server" href="/configuration/s3-setup">
+    Configure your S3 bucket settings
+  </Card>
+</CardGroup>

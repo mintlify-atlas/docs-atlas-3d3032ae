@@ -1,0 +1,493 @@
+---
+title: S3 Setup
+description: Configure Amazon S3 for PDF document storage in Workshop Cloud Chat
+---
+
+## Overview
+
+Amazon S3 (Simple Storage Service) is used to store PDF documents that you upload through Workshop Cloud Chat. These documents can then be synchronized with a Bedrock Knowledge Base for AI-powered document retrieval.
+
+<Info>
+  Make sure you have [configured AWS credentials](/configuration/aws-credentials) before setting up S3.
+</Info>
+
+## Required Parameters
+
+<ParamField path="region" type="string" required>
+  The AWS region where your S3 bucket is located.
+  
+  **Example**: `us-east-1`, `us-west-2`
+  
+  **Placeholder**: `us-east-1`
+</ParamField>
+
+<ParamField path="bucketName" type="string" required>
+  The name of your S3 bucket where PDFs will be stored.
+  
+  **Example**: `workshop-docs-bucket`
+  
+  Bucket names must:
+  - Be globally unique across all AWS accounts
+  - Be 3-63 characters long
+  - Contain only lowercase letters, numbers, hyphens, and periods
+  - Not be formatted as an IP address
+</ParamField>
+
+<ParamField path="prefix" type="string" default="documentos">
+  The folder prefix (path) within the bucket where documents will be stored.
+  
+  **Default**: `documentos`
+  
+  **Example**: If you set prefix to `pdfs`, files will be uploaded to `s3://your-bucket/pdfs/`
+  
+  <Note>The prefix helps organize files and can be used to separate different types of documents.</Note>
+</ParamField>
+
+## Configuration Steps
+
+<Steps>
+  <Step title="Open S3 Configuration Dialog">
+    Click the gear icon (⚙) next to "Cargar documentos PDF a S3" in the S3 panel.
+    
+    The dialog titled "Configuración de S3" will open.
+  </Step>
+  
+  <Step title="Enter S3 Details">
+    Fill in the S3 configuration fields:
+    
+    ```plaintext
+    Región (requerido): us-east-1
+    Bucket (requerido): workshop-docs-bucket
+    Prefijo: documentos
+    ```
+    
+    From `src/pages/index.astro:1030-1034`:
+    
+    ```html
+    <label>Región (requerido)<input name="region" placeholder="us-east-1" required /></label>
+    <label>Bucket (requerido)<input name="bucketName" required /></label>
+    <label>Prefijo<input name="prefix" value="documentos" /></label>
+    ```
+  </Step>
+  
+  <Step title="Save Configuration">
+    Click the **"Guardar"** button to save your S3 settings.
+    
+    The configuration is stored in browser localStorage.
+  </Step>
+  
+  <Step title="Verify Configuration">
+    Check the "Resumen de configuración" panel. You should see:
+    
+    ```plaintext
+    S3: us-east-1 · workshop-docs-bucket/documentos
+    ```
+    
+    From `src/pages/index.astro:1332-1334`:
+    
+    ```javascript
+    el.summaryS3.textContent = state.s3.bucketName
+      ? `S3: ${state.s3.region} · ${state.s3.bucketName}/${state.s3.prefix}`
+      : 'S3: sin configurar.';
+    ```
+  </Step>
+</Steps>
+
+## Creating an S3 Bucket
+
+If you don't have an S3 bucket yet:
+
+<Steps>
+  <Step title="Open S3 Console">
+    Navigate to the [Amazon S3 Console](https://s3.console.aws.amazon.com/s3/).
+  </Step>
+  
+  <Step title="Create Bucket">
+    Click **Create bucket** button.
+  </Step>
+  
+  <Step title="Configure Bucket">
+    - **Bucket name**: Choose a globally unique name (e.g., `workshop-chat-docs-20240315`)
+    - **Region**: Select the same region where your Bedrock agent is deployed
+    - **Block Public Access**: Keep "Block all public access" enabled (recommended for security)
+    - Leave other settings as default unless you have specific requirements
+  </Step>
+  
+  <Step title="Create Bucket">
+    Click **Create bucket** at the bottom of the page.
+  </Step>
+  
+  <Step title="Verify Bucket">
+    Your new bucket should appear in the S3 bucket list.
+  </Step>
+</Steps>
+
+## Uploading Documents
+
+Once S3 is configured, you can upload PDF documents:
+
+<Steps>
+  <Step title="Select Files">
+    You can select PDF files in two ways:
+    
+    **Drag and Drop**:
+    - Drag one or more PDF files from your computer
+    - Drop them onto the dropzone area that says "Arrastra y suelta tus documentos PDF aquí"
+    
+    **Click to Browse**:
+    - Click anywhere on the dropzone
+    - A file picker dialog will open
+    - Select one or more PDF files (multi-select is supported)
+  </Step>
+  
+  <Step title="Review Selected Files">
+    After selecting files, a preview appears showing:
+    
+    ```plaintext
+    Archivos seleccionados:
+    • document1.pdf
+    • document2.pdf
+    ```
+  </Step>
+  
+  <Step title="Upload to S3">
+    Click the **"Cargar"** button to upload the selected files.
+    
+    The upload status will update to show progress:
+    - "Cargando documento..." (while uploading)
+    - "PDF cargado correctamente..." (on success)
+    - Error message if upload fails
+  </Step>
+  
+  <Step title="View Uploaded Documents">
+    After upload, the document list refreshes automatically to show all files in your S3 bucket with the configured prefix.
+  </Step>
+</Steps>
+
+## File Upload Implementation
+
+The upload process handles file validation and naming:
+
+From `src/pages/api/upload-pdf.ts:4`:
+
+```typescript
+const sanitizeFileName = (name: string): string => name.replace(/[^a-zA-Z0-9._-]/g, '_');
+```
+
+Files are validated to ensure they're PDFs:
+
+From `src/pages/api/upload-pdf.ts:33-45`:
+
+```typescript
+if (!(file instanceof File)) {
+  return new Response(JSON.stringify({ error: 'Debe seleccionar un archivo PDF.' }), {
+    status: 400,
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
+if (file.type !== 'application/pdf') {
+  return new Response(JSON.stringify({ error: 'El archivo debe ser PDF.' }), {
+    status: 400,
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+```
+
+Each uploaded file gets a unique key with timestamp:
+
+From `src/pages/api/upload-pdf.ts:54`:
+
+```typescript
+const key = `${prefix.replace(/\/$/, '')}/${Date.now()}-${sanitizeFileName(file.name)}`;
+```
+
+## Managing Documents
+
+### View Document List
+
+The S3 panel displays all documents in your configured bucket and prefix:
+
+From `src/pages/api/upload-pdf.ts:106-112`:
+
+```typescript
+const documents = (listResponse.Contents || [])
+  .filter((item) => item.Key && item.Key !== `${prefix.replace(/\/$/, '')}/`)
+  .map((item) => ({
+    key: item.Key || '',
+    size: item.Size || 0,
+    lastModified: item.LastModified?.toISOString() || null
+  }));
+```
+
+Each document shows:
+- File name (extracted from the S3 key)
+- Visual card with hover effects
+
+### Delete Documents
+
+To remove a document from S3:
+
+1. Locate the document in the list
+2. Click the trash icon (🗑️) button on the right side of the document card
+3. The document is immediately deleted from S3
+4. The list refreshes to show the updated document set
+
+Delete implementation from `src/pages/api/upload-pdf.ts:154-159`:
+
+```typescript
+await client.send(
+  new DeleteObjectCommand({
+    Bucket: payload.bucketName,
+    Key: payload.key
+  })
+);
+```
+
+### Refresh Document List
+
+To manually refresh the document list:
+
+1. Click the refresh icon (↻) button next to the "Cargar" button
+2. The application fetches the latest document list from S3
+
+## How S3 Client Works
+
+The S3 client is initialized with your AWS credentials:
+
+From `src/pages/api/upload-pdf.ts:6-19`:
+
+```typescript
+const getS3Client = (
+  region: string,
+  accessKeyId: string,
+  secretAccessKey: string,
+  sessionToken?: string
+): S3Client =>
+  new S3Client({
+    region,
+    credentials: {
+      accessKeyId,
+      secretAccessKey,
+      sessionToken: sessionToken || undefined
+    }
+  });
+```
+
+### Upload Operation
+
+Uploading uses the `PutObjectCommand`:
+
+From `src/pages/api/upload-pdf.ts:60-67`:
+
+```typescript
+await client.send(
+  new PutObjectCommand({
+    Bucket: bucketName,
+    Key: key,
+    Body: Buffer.from(buffer),
+    ContentType: 'application/pdf'
+  })
+);
+```
+
+### List Operation
+
+Listing documents uses the `ListObjectsV2Command`:
+
+From `src/pages/api/upload-pdf.ts:99-104`:
+
+```typescript
+const listResponse = await client.send(
+  new ListObjectsV2Command({
+    Bucket: bucketName,
+    Prefix: prefix
+  })
+);
+```
+
+## Validation Logic
+
+The upload section is enabled only when S3 is properly configured:
+
+From `src/pages/index.astro:1529`:
+
+```javascript
+const isS3Configured = () => Boolean(state.s3.region && state.s3.bucketName && isAwsConfigured());
+```
+
+The upload button is enabled only when:
+1. S3 is configured
+2. At least one PDF file is selected
+
+From `src/pages/index.astro:1533-1537`:
+
+```javascript
+const updateUploadButtonState = () => {
+  const uploadReady = isS3Configured();
+  const hasFilesSelected = state.selectedPdfFiles.length > 0;
+  el.uploadPdf.disabled = !(uploadReady && hasFilesSelected);
+};
+```
+
+## Drag and Drop Interface
+
+The dropzone provides visual feedback:
+
+- **Normal state**: Dashed border with neutral colors
+- **Hover state**: Border color changes to primary color
+- **Drag over state**: Border and shadow highlight, slight upward translation
+- **Disabled state**: Reduced opacity, "not-allowed" cursor
+
+From `src/pages/index.astro:780-802`:
+
+```css
+.dropzone {
+  border: 1.5px dashed var(--border);
+  border-radius: 12px;
+  padding: 18px 14px;
+  background: color-mix(in srgb, var(--secondary-bg) 36%, var(--surface));
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  cursor: pointer;
+}
+
+.dropzone:hover {
+  border-color: var(--primary);
+}
+
+.dropzone.dragover {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent);
+  transform: translateY(-1px);
+}
+```
+
+## Managing Configuration
+
+### Clear S3 Configuration
+
+To remove S3 settings:
+
+1. Open the S3 configuration dialog
+2. Click **"Borrar configuración"**
+3. This clears region, bucket name, and prefix from localStorage
+
+### Cancel Without Saving
+
+To close the dialog without applying changes:
+
+1. Click **"Cancelar sin guardar"**
+2. The dialog closes and previous S3 settings remain unchanged
+
+## Troubleshooting
+
+### Upload Section Disabled
+
+**Symptoms**: Dropzone shows disabled state, upload button is grayed out.
+
+**Solutions**:
+- Verify AWS credentials are configured
+- Ensure S3 region and bucket name are provided
+- Check the configuration summary panel
+
+### "Debe seleccionar un archivo PDF" Error
+
+**Symptoms**: Upload fails with this error message.
+
+**Solutions**:
+- Ensure you've selected at least one file
+- Verify the file is actually selected (check the preview list)
+
+### "El archivo debe ser PDF" Error
+
+**Symptoms**: Upload fails when trying to upload a file.
+
+**Solutions**:
+- Only PDF files (`.pdf` extension) are supported
+- Check that your file has the correct extension
+- The file must have MIME type `application/pdf`
+
+### "Faltan parámetros de S3" Error
+
+**Symptoms**: API returns 400 error when uploading.
+
+**Solutions**:
+- Re-open S3 configuration dialog
+- Verify region and bucket name are filled
+- Ensure AWS credentials are configured
+- Save configuration again
+
+### Permission Denied Errors
+
+**Symptoms**: Upload fails with access denied or permission error.
+
+**Solutions**:
+- Check IAM user/role has `s3:PutObject` permission for your bucket
+- Verify IAM user has `s3:ListBucket` permission
+- Check bucket policy doesn't block your requests
+- Ensure bucket exists in the specified region
+
+### Documents Not Appearing
+
+**Symptoms**: Uploaded successfully but documents don't show in the list.
+
+**Solutions**:
+- Click the refresh button (↻) to reload the document list
+- Verify the prefix matches what you configured
+- Check S3 console to confirm files are actually uploaded
+- Ensure IAM user has `s3:ListBucket` permission
+
+## Required IAM Permissions
+
+Your IAM user or role needs these S3 permissions:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::your-bucket-name/*",
+        "arn:aws:s3:::your-bucket-name"
+      ]
+    }
+  ]
+}
+```
+
+<Warning>
+  Replace `your-bucket-name` with your actual S3 bucket name.
+</Warning>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Descriptive Prefixes" icon="folder-tree">
+    Organize documents with meaningful prefixes like `legal/`, `technical/`, `reports/`.
+  </Card>
+  
+  <Card title="Enable Versioning" icon="clock-rotate-left">
+    Turn on S3 versioning to protect against accidental deletions and overwrites.
+  </Card>
+  
+  <Card title="Set Lifecycle Policies" icon="recycle">
+    Configure lifecycle rules to automatically archive or delete old documents.
+  </Card>
+  
+  <Card title="Monitor Bucket Size" icon="chart-simple">
+    Use CloudWatch metrics to track storage usage and costs.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+- [Configure Knowledge Base](/configuration/knowledge-base) to sync uploaded documents
+- Learn about [Document Management](/guides/managing-documents)
+- Understand [S3 Costs and Optimization](/advanced/cost-optimization)

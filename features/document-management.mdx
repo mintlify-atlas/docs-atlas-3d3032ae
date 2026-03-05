@@ -1,0 +1,553 @@
+---
+title: "Document Management"
+description: "Upload, manage, and delete PDF documents in Amazon S3 with drag-and-drop support"
+---
+
+## Overview
+
+The document management system provides a complete interface for uploading PDF files to Amazon S3, listing existing documents, and managing your document collection. It includes drag-and-drop functionality, multiple file upload support, and real-time status updates.
+
+<CardGroup cols={2}>
+  <Card title="PDF Upload" icon="upload">
+    Upload multiple PDF documents with drag-and-drop or file picker
+  </Card>
+  <Card title="S3 Storage" icon="database">
+    Automatic storage in configured S3 bucket with timestamped keys
+  </Card>
+  <Card title="Document Listing" icon="list">
+    View all uploaded documents with metadata
+  </Card>
+  <Card title="Delete Documents" icon="trash">
+    Remove documents from S3 with one-click deletion
+  </Card>
+</CardGroup>
+
+## S3 Configuration
+
+Before uploading documents, configure your S3 settings through the configuration dialog.
+
+### Required Parameters
+
+<Note>
+  All S3 operations require valid AWS credentials configured in the chat settings.
+</Note>
+
+```typescript
+const state = {
+  s3: {
+    region: '',        // AWS region (e.g., 'us-east-1')
+    bucketName: '',    // S3 bucket name
+    prefix: 'documentos'  // Folder prefix for documents
+  }
+};
+```
+
+### Configuration Dialog
+
+```html
+<dialog id="s3Dialog">
+  <form method="dialog" class="modal" id="s3Form">
+    <h2>Configuración de S3</h2>
+    <p class="hint required-note">
+      Los campos marcados como (requerido) son obligatorios.
+    </p>
+    <div class="grid-2">
+      <label>Región (requerido)
+        <input name="region" placeholder="us-east-1" required />
+      </label>
+      <label>Bucket (requerido)
+        <input name="bucketName" required />
+      </label>
+      <label>Prefijo
+        <input name="prefix" value="documentos" />
+      </label>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <button class="primary" type="submit">Guardar</button>
+      <button class="ghost" type="button" id="clearS3Config">
+        Borrar configuración
+      </button>
+      <button class="ghost" type="button" id="cancelS3Config">
+        Cancelar sin guardar
+      </button>
+    </div>
+  </form>
+</dialog>
+```
+
+## File Upload Interface
+
+### Drag-and-Drop Zone
+
+The upload interface features a drag-and-drop zone with visual feedback:
+
+```html
+<input type="file" id="pdfFile" accept="application/pdf" hidden multiple />
+<div class="dropzone" id="pdfDropzone" 
+     role="button" 
+     tabindex="0" 
+     aria-label="Arrastra y suelta tus documentos PDF o presiona Enter para seleccionar">
+  <p class="dropzone-title">Arrastra y suelta tus documentos PDF aquí</p>
+  <p class="dropzone-subtitle">o haz clic para seleccionarlos desde tu equipo</p>
+</div>
+```
+
+### Drag-and-Drop Styling
+
+The dropzone provides visual feedback during drag operations:
+
+```css
+.dropzone {
+  border: 1.5px dashed var(--border);
+  border-radius: 12px;
+  padding: 18px 14px;
+  background: color-mix(in srgb, var(--secondary-bg) 36%, var(--surface));
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  cursor: pointer;
+}
+
+.dropzone:hover {
+  border-color: var(--primary);
+}
+
+.dropzone.dragover {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent);
+  transform: translateY(-1px);
+}
+
+.dropzone.disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+```
+
+### File Selection Preview
+
+Selected files are displayed before upload:
+
+```html
+<div class="selected-files-preview" id="selectedFilesPreview">
+  Ningún archivo seleccionado.
+</div>
+```
+
+The preview updates when files are selected:
+
+```javascript
+// Example preview rendering
+if (state.selectedPdfFiles.length > 0) {
+  const fileList = state.selectedPdfFiles.map(f => f.name).join(', ');
+  el.selectedFilesPreview.textContent = `${state.selectedPdfFiles.length} archivo(s) seleccionado(s): ${fileList}`;
+} else {
+  el.selectedFilesPreview.textContent = 'Ningún archivo seleccionado.';
+}
+```
+
+## Upload API
+
+### POST Endpoint
+
+The upload endpoint handles PDF file uploads to S3:
+
+```typescript
+// From src/pages/api/upload-pdf.ts
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+
+const sanitizeFileName = (name: string): string => 
+  name.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+const getS3Client = (
+  region: string,
+  accessKeyId: string,
+  secretAccessKey: string,
+  sessionToken?: string
+): S3Client =>
+  new S3Client({
+    region,
+    credentials: {
+      accessKeyId,
+      secretAccessKey,
+      sessionToken: sessionToken || undefined
+    }
+  });
+
+export const POST: APIRoute = async ({ request }) => {
+  const formData = await request.formData();
+
+  const file = formData.get('file');
+  const region = String(formData.get('region') || '');
+  const bucketName = String(formData.get('bucketName') || '');
+  const accessKeyId = String(formData.get('accessKeyId') || '');
+  const secretAccessKey = String(formData.get('secretAccessKey') || '');
+  const sessionToken = String(formData.get('sessionToken') || '');
+  const prefix = String(formData.get('prefix') || 'documentos');
+
+  // Validate file
+  if (!(file instanceof File)) {
+    return new Response(JSON.stringify({ 
+      error: 'Debe seleccionar un archivo PDF.' 
+    }), { status: 400 });
+  }
+
+  if (file.type !== 'application/pdf') {
+    return new Response(JSON.stringify({ 
+      error: 'El archivo debe ser PDF.' 
+    }), { status: 400 });
+  }
+
+  // Validate configuration
+  if (!region || !bucketName || !accessKeyId || !secretAccessKey) {
+    return new Response(JSON.stringify({ 
+      error: 'Faltan parámetros de S3.' 
+    }), { status: 400 });
+  }
+
+  // Generate unique key with timestamp
+  const key = `${prefix.replace(/\/$/, '')}/${Date.now()}-${sanitizeFileName(file.name)}`;
+
+  const client = getS3Client(region, accessKeyId, secretAccessKey, sessionToken);
+
+  const buffer = await file.arrayBuffer();
+
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucketName,
+      Key: key,
+      Body: Buffer.from(buffer),
+      ContentType: 'application/pdf'
+    })
+  );
+
+  return new Response(JSON.stringify({ ok: true, bucketName, key }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' }
+  });
+};
+```
+
+<Info>
+  File names are sanitized to prevent special characters in S3 keys, and timestamps are prepended to ensure uniqueness.
+</Info>
+
+## Document Listing
+
+### GET Endpoint
+
+List all documents in the configured S3 bucket:
+
+```typescript
+// From src/pages/api/upload-pdf.ts
+import { ListObjectsV2Command } from '@aws-sdk/client-s3';
+
+export const GET: APIRoute = async ({ url }) => {
+  const region = url.searchParams.get('region') || '';
+  const bucketName = url.searchParams.get('bucketName') || '';
+  const accessKeyId = url.searchParams.get('accessKeyId') || '';
+  const secretAccessKey = url.searchParams.get('secretAccessKey') || '';
+  const sessionToken = url.searchParams.get('sessionToken') || '';
+  const prefix = url.searchParams.get('prefix') || 'documentos';
+
+  if (!region || !bucketName || !accessKeyId || !secretAccessKey) {
+    return new Response(JSON.stringify({ 
+      error: 'Faltan parámetros de S3 para listar documentos.' 
+    }), { status: 400 });
+  }
+
+  const client = getS3Client(region, accessKeyId, secretAccessKey, sessionToken);
+  
+  const listResponse = await client.send(
+    new ListObjectsV2Command({
+      Bucket: bucketName,
+      Prefix: prefix
+    })
+  );
+
+  const documents = (listResponse.Contents || [])
+    .filter((item) => item.Key && item.Key !== `${prefix.replace(/\/$/, '')}/`)
+    .map((item) => ({
+      key: item.Key || '',
+      size: item.Size || 0,
+      lastModified: item.LastModified?.toISOString() || null
+    }));
+
+  return new Response(JSON.stringify({ documents }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' }
+  });
+};
+```
+
+### Document Display
+
+Documents are rendered in a scrollable list with delete buttons:
+
+```javascript
+const renderS3Documents = () => {
+  el.s3Documents.innerHTML = '';
+
+  if (state.s3Documents.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 's3-empty';
+    empty.textContent = 'No hay documentos listados en S3.';
+    el.s3Documents.appendChild(empty);
+    return;
+  }
+
+  state.s3Documents.forEach((doc) => {
+    const row = document.createElement('div');
+    row.className = 's3-doc-item';
+
+    const name = document.createElement('div');
+    name.className = 's3-doc-name';
+    name.textContent = doc.key.split('/').pop() || doc.key;
+
+    const removeButton = document.createElement('button');
+    removeButton.className = 's3-doc-delete';
+    removeButton.innerHTML = `
+      <svg viewBox="0 0 24 24" stroke="#ff3b4f" fill="none" 
+           stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 6h18" />
+        <path d="M8 6V4h8v2" />
+        <path d="M6 6l1 14h10l1-14" />
+        <path d="M10 11v6" />
+        <path d="M14 11v6" />
+      </svg>
+    `;
+    removeButton.ariaLabel = `Eliminar ${name.textContent}`;
+    removeButton.addEventListener('click', () => void deleteS3Document(doc.key));
+
+    row.appendChild(name);
+    row.appendChild(removeButton);
+    el.s3Documents.appendChild(row);
+  });
+};
+```
+
+### Document List Styling
+
+```css
+.s3-docs {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px;
+  max-height: 250px;
+  overflow: auto;
+  background: color-mix(in srgb, var(--surface) 92%, var(--secondary-bg));
+}
+
+.s3-doc-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 82%, var(--secondary-bg));
+  margin: 0 0 8px;
+  transition: border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.s3-doc-item:hover {
+  border-color: color-mix(in srgb, var(--primary) 36%, var(--border));
+  background: color-mix(in srgb, var(--surface) 72%, var(--secondary-bg));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 14%, transparent);
+}
+
+.s3-doc-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 8px;
+}
+```
+
+## Document Deletion
+
+### DELETE Endpoint
+
+Delete documents from S3:
+
+```typescript
+// From src/pages/api/upload-pdf.ts
+import { DeleteObjectCommand } from '@aws-sdk/client-s3';
+
+type DeleteRequest = {
+  region: string;
+  bucketName: string;
+  key: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken?: string;
+};
+
+export const DELETE: APIRoute = async ({ request }) => {
+  const payload = await request.json() as DeleteRequest;
+
+  if (!payload.region || !payload.bucketName || !payload.key || 
+      !payload.accessKeyId || !payload.secretAccessKey) {
+    return new Response(JSON.stringify({ 
+      error: 'Faltan parámetros de S3 para eliminar el documento.' 
+    }), { status: 400 });
+  }
+
+  const client = getS3Client(
+    payload.region,
+    payload.accessKeyId,
+    payload.secretAccessKey,
+    payload.sessionToken
+  );
+
+  await client.send(
+    new DeleteObjectCommand({
+      Bucket: payload.bucketName,
+      Key: payload.key
+    })
+  );
+
+  return new Response(JSON.stringify({ ok: true, key: payload.key }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' }
+  });
+};
+```
+
+### Delete Button Styling
+
+```css
+.s3-doc-delete {
+  margin-left: auto;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: #ff3b4f !important;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.16s ease, filter 0.16s ease, 
+              background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.s3-doc-delete:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+  background: color-mix(in srgb, #ff3b4f 24%, transparent);
+}
+
+.s3-doc-delete:active {
+  transform: translateY(0);
+}
+
+.s3-doc-delete:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #ff3b4f 24%, transparent);
+}
+```
+
+## Upload Actions
+
+### Action Buttons
+
+```html
+<div class="upload-actions" style="margin-top:8px;">
+  <button class="primary" id="uploadPdf">Cargar</button>
+  <button class="ghost icon-btn refresh-icon-btn" 
+          id="refreshS3Docs" 
+          aria-label="Actualizar lista" 
+          title="Actualizar lista">
+    ↻
+  </button>
+</div>
+<div class="selected-files-preview" id="selectedFilesPreview">
+  Ningún archivo seleccionado.
+</div>
+<p class="hint" id="uploadStatus">Sin archivo cargado.</p>
+```
+
+### Button State Management
+
+Buttons are enabled/disabled based on configuration and file selection:
+
+```javascript
+const updateUploadButtonState = () => {
+  const uploadReady = isS3Configured();
+  const hasFilesSelected = state.selectedPdfFiles.length > 0;
+  el.uploadPdf.disabled = !(uploadReady && hasFilesSelected);
+};
+
+const isS3Configured = () => 
+  Boolean(
+    state.s3.region && 
+    state.s3.bucketName && 
+    isAwsConfigured()
+  );
+```
+
+## File Validation
+
+<Note>
+  Only PDF files are accepted. The server validates the MIME type to ensure compliance.
+</Note>
+
+```typescript
+// Server-side validation
+if (file.type !== 'application/pdf') {
+  return new Response(JSON.stringify({ 
+    error: 'El archivo debe ser PDF.' 
+  }), { status: 400 });
+}
+```
+
+```html
+<!-- Client-side validation -->
+<input type="file" id="pdfFile" accept="application/pdf" hidden multiple />
+```
+
+## S3 Key Structure
+
+Documents are stored with a predictable key structure:
+
+```
+{prefix}/{timestamp}-{sanitized-filename}.pdf
+```
+
+**Example:**
+```
+documentos/1709654321000-user_guide_v2.pdf
+```
+
+The timestamp ensures uniqueness and provides chronological ordering.
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="File Naming" icon="tag">
+    Use descriptive file names that will be meaningful in the S3 bucket
+  </Card>
+  <Card title="Bucket Organization" icon="folder">
+    Use the prefix parameter to organize documents into logical folders
+  </Card>
+  <Card title="Error Handling" icon="exclamation-triangle">
+    Always check upload status before proceeding with sync operations
+  </Card>
+  <Card title="Cleanup" icon="broom">
+    Regularly review and delete outdated documents to manage storage costs
+  </Card>
+</CardGroup>
+
+## Related Resources
+
+- [Chat Interface](/features/chat-interface) - Use uploaded documents in chat conversations
+- [Knowledge Base Sync](/features/knowledge-base-sync) - Sync documents with Bedrock Knowledge Base
+- [API Reference](/api-reference/upload) - Complete upload API documentation

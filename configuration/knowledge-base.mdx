@@ -1,0 +1,532 @@
+---
+title: Knowledge Base Configuration
+description: Configure Amazon Bedrock Knowledge Base synchronization for Workshop Cloud Chat
+---
+
+## Overview
+
+The Knowledge Base synchronization feature allows you to sync PDF documents from your S3 bucket into Amazon Bedrock Knowledge Base. This enables the AI agent to retrieve and reference information from your uploaded documents when answering questions.
+
+<Info>
+  Make sure you have configured [AWS credentials](/configuration/aws-credentials) and [S3 setup](/configuration/s3-setup) before setting up Knowledge Base synchronization.
+</Info>
+
+## Required Parameters
+
+<ParamField path="region" type="string" required>
+  The AWS region where your Bedrock Knowledge Base is deployed.
+  
+  **Example**: `us-east-1`, `us-west-2`
+  
+  **Placeholder**: `us-east-1`
+  
+  <Note>This should typically be the same region as your S3 bucket and Bedrock agent.</Note>
+</ParamField>
+
+<ParamField path="knowledgeBaseId" type="string" required>
+  The unique identifier for your Bedrock Knowledge Base.
+  
+  **Example**: `ABCD12EFGH`
+  
+  This is the Knowledge Base ID from the Amazon Bedrock console.
+</ParamField>
+
+<ParamField path="dataSourceId" type="string" required>
+  The identifier for the data source within your Knowledge Base.
+  
+  **Example**: `XYZ789MNOP`
+  
+  This connects to the specific S3 data source in your Knowledge Base configuration.
+</ParamField>
+
+<ParamField path="description" type="string" default="Sincronización manual desde UI">
+  Optional description for the synchronization job.
+  
+  **Default**: `Sincronización manual desde UI`
+  
+  This description appears in AWS CloudWatch logs and can help you identify manual syncs from the UI.
+</ParamField>
+
+## Configuration Steps
+
+<Steps>
+  <Step title="Open Sync Configuration Dialog">
+    Click the gear icon (⚙) next to "Sincronización de Knowledge Base" in the right sidebar panel.
+    
+    The dialog titled "Configuración de sincronización KB" will open.
+  </Step>
+  
+  <Step title="Enter Knowledge Base Details">
+    Fill in the Knowledge Base configuration fields:
+    
+    ```plaintext
+    Región (requerido): us-east-1
+    Knowledge Base ID (requerido): ABCD12EFGH
+    Data Source ID (requerido): XYZ789MNOP
+    Descripción: Sincronización manual desde UI
+    ```
+    
+    From `src/pages/index.astro:1048-1053`:
+    
+    ```html
+    <label>Región (requerido)<input name="region" placeholder="us-east-1" required /></label>
+    <label>Knowledge Base ID (requerido)<input name="knowledgeBaseId" required /></label>
+    <label>Data Source ID (requerido)<input name="dataSourceId" required /></label>
+    <label>Descripción<input name="description" value="Sincronización manual desde UI" /></label>
+    ```
+  </Step>
+  
+  <Step title="Save Configuration">
+    Click the **"Guardar"** button to save your Knowledge Base settings.
+    
+    The configuration is persisted to browser localStorage.
+  </Step>
+  
+  <Step title="Verify Configuration">
+    Check the "Resumen de configuración" panel. You should see:
+    
+    ```plaintext
+    KB Sync: us-east-1 · KB ABCD12EFGH · DS XYZ789MNOP
+    ```
+    
+    From `src/pages/index.astro:1336-1338`:
+    
+    ```javascript
+    el.summarySync.textContent = state.sync.knowledgeBaseId
+      ? `KB Sync: ${state.sync.region} · KB ${state.sync.knowledgeBaseId} · DS ${state.sync.dataSourceId}`
+      : 'KB Sync: sin configurar.';
+    ```
+  </Step>
+</Steps>
+
+## Creating a Knowledge Base
+
+If you don't have a Knowledge Base yet:
+
+<Steps>
+  <Step title="Open Bedrock Console">
+    Navigate to the [Amazon Bedrock Console](https://console.aws.amazon.com/bedrock/).
+  </Step>
+  
+  <Step title="Navigate to Knowledge Bases">
+    In the left sidebar, click **Knowledge bases** under the Orchestration section.
+  </Step>
+  
+  <Step title="Create Knowledge Base">
+    Click **Create knowledge base** button.
+    
+    - **Name**: Give your knowledge base a descriptive name
+    - **Description**: Optional description of what documents this KB contains
+    - **IAM role**: Choose an existing role or create a new one with required permissions
+  </Step>
+  
+  <Step title="Configure Data Source">
+    - **Data source name**: Name your S3 data source
+    - **S3 URI**: Enter your bucket URI (e.g., `s3://workshop-docs-bucket/documentos/`)
+    - **Chunking strategy**: Choose how documents are split (default or custom)
+    - **Embeddings model**: Select a model for generating embeddings (e.g., `amazon.titan-embed-text-v1`)
+  </Step>
+  
+  <Step title="Complete Setup">
+    - Review your configuration
+    - Click **Create knowledge base**
+    - Wait for the knowledge base to be created
+  </Step>
+  
+  <Step title="Note IDs">
+    After creation:
+    
+    - Copy the **Knowledge base ID** from the details page
+    - Navigate to **Data sources** tab
+    - Copy the **Data source ID** for your S3 data source
+  </Step>
+</Steps>
+
+## Running a Synchronization
+
+Once configured, you can sync your S3 documents to the Knowledge Base:
+
+<Steps>
+  <Step title="Start Sync Job">
+    In the "Sincronización de Knowledge Base" panel, click the **"Ejecutar sincronización"** button.
+    
+    The application creates a new ingestion job in AWS.
+  </Step>
+  
+  <Step title="Monitor Progress">
+    The sync status updates automatically:
+    
+    - **PENDIENTE**: Job is being created
+    - **EN_EJECUCION**: Ingestion is in progress
+    - **COMPLETADO**: Sync finished successfully
+    - **FALLIDO**: Sync failed with errors
+    
+    From `src/pages/api/sync.ts:8`:
+    
+    ```typescript
+    type SyncStatus = 'PENDIENTE' | 'EN_EJECUCION' | 'COMPLETADO' | 'FALLIDO';
+    ```
+  </Step>
+  
+  <Step title="View Logs">
+    Each execution appears as a collapsible section showing:
+    
+    - Job ID
+    - Current status
+    - Start time
+    - Completion time (when finished)
+    - Detailed logs of the sync process
+    
+    Click the section to expand and view full logs.
+  </Step>
+  
+  <Step title="Refresh History">
+    Click the refresh icon (↻) to fetch the latest execution history from AWS.
+    
+    This retrieves up to 40 recent ingestion jobs from the Bedrock Knowledge Base service.
+  </Step>
+</Steps>
+
+## How Synchronization Works
+
+### Starting a Sync Job
+
+When you click "Ejecutar sincronización", the application:
+
+1. Creates an execution record with a unique ID
+2. Initiates an ingestion job via AWS API
+3. Polls the job status every 4 seconds
+4. Updates logs in real-time
+
+From `src/pages/api/sync.ts:56-62`:
+
+```typescript
+const startResponse = await client.send(
+  new StartIngestionJobCommand({
+    knowledgeBaseId: payload.knowledgeBaseId,
+    dataSourceId: payload.dataSourceId,
+    description: payload.description || 'Sincronización ejecutada desde la interfaz de chat'
+  })
+);
+```
+
+### Polling for Status Updates
+
+The sync process continuously checks job status:
+
+From `src/pages/api/sync.ts:74-87`:
+
+```typescript
+while (currentStatus === 'STARTING' || currentStatus === 'IN_PROGRESS') {
+  await wait(4000);
+
+  const statusResponse = await client.send(
+    new GetIngestionJobCommand({
+      knowledgeBaseId: payload.knowledgeBaseId,
+      dataSourceId: payload.dataSourceId,
+      ingestionJobId
+    })
+  );
+
+  currentStatus = statusResponse.ingestionJob?.status;
+  addLog(executionId, `Estado actual: ${currentStatus || 'DESCONOCIDO'}`);
+}
+```
+
+### Status Mapping
+
+AWS statuses are mapped to UI-friendly statuses:
+
+From `src/pages/api/sync-history.ts:16-21`:
+
+```typescript
+const mapAwsStatusToUiStatus = (status?: string): UiSyncStatus => {
+  if (status === 'COMPLETE') return 'COMPLETADO';
+  if (status === 'FAILED') return 'FALLIDO';
+  if (status === 'IN_PROGRESS' || status === 'STARTING') return 'EN_EJECUCION';
+  return 'PENDIENTE';
+};
+```
+
+### Retrieving Sync History
+
+The refresh button fetches recent jobs from AWS:
+
+From `src/pages/api/sync-history.ts:51-57`:
+
+```typescript
+const listResponse = await client.send(
+  new ListIngestionJobsCommand({
+    knowledgeBaseId: payload.knowledgeBaseId,
+    dataSourceId: payload.dataSourceId,
+    maxResults
+  })
+);
+```
+
+## Execution History
+
+The sync panel displays execution history with two types of entries:
+
+### Local Executions
+
+- Created when you start a sync from the UI
+- Stored in localStorage
+- Show real-time progress with detailed logs
+- Identified without "AWS" prefix
+
+### AWS Executions
+
+- Retrieved from AWS Bedrock Knowledge Base API
+- Historical jobs that may have been started elsewhere
+- Show summary information
+- Identified with "AWS" prefix in the job title
+
+From `src/pages/index.astro:1452`:
+
+```javascript
+const sourceLabel = exec.source ? `${exec.source} · ` : '';
+```
+
+## Execution Details
+
+Each execution record contains:
+
+From `src/pages/api/sync.ts:10-16`:
+
+```typescript
+type SyncExecution = {
+  id: string;
+  status: SyncStatus;
+  logs: string[];
+  startedAt: string;
+  finishedAt?: string;
+};
+```
+
+### Log Messages
+
+Logs include timestamps and status updates:
+
+From `src/pages/api/sync.ts:32-36`:
+
+```typescript
+const addLog = (executionId: string, message: string): void => {
+  const execution = executions.get(executionId);
+  if (!execution) return;
+  execution.logs.push(`[${new Date().toLocaleString('es-ES')}] ${message}`);
+};
+```
+
+Typical log sequence:
+1. "Ejecución creada."
+2. "Iniciando tarea de sincronización en Bedrock Knowledge Base..."
+3. "Ingestion Job iniciado: [job-id]"
+4. Multiple "Estado actual: [status]" updates
+5. "Sincronización completada correctamente." or error message
+
+## Validation Logic
+
+The sync section is enabled only when properly configured:
+
+From `src/pages/index.astro:1530-1531`:
+
+```javascript
+const isSyncConfigured = () =>
+  Boolean(state.sync.region && state.sync.knowledgeBaseId && state.sync.dataSourceId && isAwsConfigured());
+```
+
+Both the sync and refresh buttons are disabled when configuration is missing:
+
+From `src/pages/index.astro:1557-1558`:
+
+```javascript
+el.startSync.disabled = !syncReady;
+el.refreshSyncHistory.disabled = !syncReady;
+```
+
+## Managing Configuration
+
+### Clear Sync Configuration
+
+To remove Knowledge Base settings:
+
+1. Open the sync configuration dialog
+2. Click **"Borrar configuración"**
+3. This clears region, Knowledge Base ID, and Data Source ID from localStorage
+
+### Cancel Without Saving
+
+To close the dialog without applying changes:
+
+1. Click **"Cancelar sin guardar"**
+2. The dialog closes and previous sync settings remain unchanged
+
+## Troubleshooting
+
+### Sync Button Disabled
+
+**Symptoms**: "Ejecutar sincronización" button is grayed out.
+
+**Solutions**:
+- Verify AWS credentials are configured
+- Ensure Knowledge Base ID and Data Source ID are provided
+- Check the configuration summary panel
+- Verify region is specified
+
+### "Faltan parámetros de sincronización" Error
+
+**Symptoms**: API returns 400 error when starting sync.
+
+**Solutions**:
+- Re-open sync configuration dialog
+- Verify all required fields are filled
+- Ensure AWS credentials are configured
+- Save configuration again
+
+### "No se recibió un ingestionJobId en la respuesta" Error
+
+**Symptoms**: Sync starts but fails immediately with this error.
+
+**Solutions**:
+- Verify Knowledge Base ID and Data Source ID are correct
+- Check that the Knowledge Base exists in the specified region
+- Ensure the Data Source ID belongs to the specified Knowledge Base
+- Check AWS console for Knowledge Base status
+
+### Sync Stuck in "EN_EJECUCION"
+
+**Symptoms**: Sync status shows "EN_EJECUCION" for extended period.
+
+**Solutions**:
+- Large document sets can take 10-30+ minutes to process
+- Check AWS Bedrock console for actual job status
+- Review CloudWatch logs for detailed progress
+- If truly stuck, the job may have failed - check AWS console
+
+### "No se encontró la ejecución solicitada" Error
+
+**Symptoms**: Error when checking execution status.
+
+**Solutions**:
+- The execution may have been started in a different browser session
+- Refresh the page to reload execution history
+- Click the refresh button (↻) to fetch from AWS
+
+### Permission Denied Errors
+
+**Symptoms**: Sync fails with access denied or permission error.
+
+**Solutions**:
+- Check IAM user/role has `bedrock:StartIngestionJob` permission
+- Verify IAM user has `bedrock:GetIngestionJob` permission
+- Ensure IAM user has `bedrock:ListIngestionJobs` permission
+- Check Knowledge Base IAM role has S3 read permissions
+
+## Required IAM Permissions
+
+Your IAM user or role needs these Bedrock permissions:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:StartIngestionJob",
+        "bedrock:GetIngestionJob",
+        "bedrock:ListIngestionJobs"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:us-east-1:123456789012:knowledge-base/*"
+      ]
+    }
+  ]
+}
+```
+
+<Warning>
+  Replace `us-east-1` and `123456789012` with your actual region and AWS account ID.
+</Warning>
+
+The Knowledge Base service role needs S3 permissions:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::your-bucket-name/*",
+        "arn:aws:s3:::your-bucket-name"
+      ]
+    }
+  ]
+}
+```
+
+## Understanding Ingestion Jobs
+
+### What Happens During Sync
+
+1. **Discovery**: Bedrock scans the S3 data source for new/changed files
+2. **Processing**: Documents are parsed and split into chunks
+3. **Embedding**: Each chunk is converted to vector embeddings
+4. **Indexing**: Embeddings are stored in the Knowledge Base vector store
+5. **Completion**: Knowledge Base is ready to answer questions about the documents
+
+### Sync Duration
+
+Ingestion time depends on:
+- Number of documents
+- Total size of documents
+- Complexity of content (text, tables, images)
+- Chunking strategy
+- Embeddings model selected
+
+**Typical times**:
+- 1-5 PDFs: 1-3 minutes
+- 10-50 PDFs: 5-15 minutes
+- 100+ PDFs: 30-60+ minutes
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Sync After Uploads" icon="arrows-rotate">
+    Run a sync job after uploading new documents to make them available to the AI agent.
+  </Card>
+  
+  <Card title="Monitor Sync Logs" icon="file-lines">
+    Review sync logs to understand processing and catch any errors early.
+  </Card>
+  
+  <Card title="Schedule Regular Syncs" icon="clock">
+    For production use, consider scheduling automatic syncs via AWS EventBridge.
+  </Card>
+  
+  <Card title="Optimize Document Size" icon="file-pdf">
+    Keep PDFs reasonably sized (< 50MB each) for faster processing.
+  </Card>
+</CardGroup>
+
+## Advanced: Automatic Sync
+
+For production deployments, consider setting up automatic synchronization:
+
+1. **S3 Event Notifications**: Configure S3 to trigger Lambda on new uploads
+2. **Lambda Function**: Create a function to call `StartIngestionJob`
+3. **EventBridge Schedule**: Set up periodic syncs (e.g., daily at 2 AM)
+
+This ensures documents are always synchronized without manual intervention.
+
+## Next Steps
+
+- Learn about [Using the Chat Interface](/guides/using-chat) with your Knowledge Base
+- Understand [Document Management Best Practices](/guides/managing-documents)
+- Explore [Monitoring and Debugging](/advanced/monitoring)
